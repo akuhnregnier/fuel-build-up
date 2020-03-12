@@ -27,8 +27,7 @@ from wildfires.data.datasets import (
     GFEDv4s,
     regions_GFED,
 )
-from wildfires.utils import land_mask as get_land_mask
-from wildfires.utils import match_shape
+from wildfires.utils import get_land_mask, match_shape
 
 if __name__ == "__main__":
     fire_datasets = Datasets(

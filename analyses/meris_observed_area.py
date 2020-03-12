@@ -16,7 +16,7 @@ from wildfires.analysis.plotting import *
 from wildfires.data.cube_aggregation import *
 from wildfires.data.datasets import *
 from wildfires.logging_config import enable_logging
-from wildfires.utils import land_mask as get_land_mask
+from wildfires.utils import get_land_mask
 
 memory = Memory(DATA_DIR)
 
