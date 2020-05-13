@@ -1,19 +1,24 @@
 # -*- coding: utf-8 -*-
+import logging
+import os
+
 import cartopy.crs as ccrs
 import iris
 import matplotlib as mpl
 import matplotlib.pyplot as plt
+import numpy as np
 
 # Also instruct autoflake to keep this line.
 import nc_time_axis  # noqa
-import numpy as np
-from joblib import Memory
-
 from wildfires.analysis import *
 from wildfires.data import *
+from wildfires.logging_config import enable_logging
 from wildfires.utils import get_land_mask
 
-memory = Memory(".")
+logger = logging.getLogger(__name__)
+enable_logging()
+
+memory = get_memory("analysis_brazil_generating_genius")
 
 # This is where the reserve is located.
 reserve_lon = -55.629804
@@ -58,7 +63,7 @@ def get_temporal_variables(
             cube = cube.extract(
                 iris.Constraint(
                     coord_values=dict(
-                        time=lambda cell: min_year < cell.point.year,
+                        time=lambda cell: min_year <= cell.point.year,
                         latitude=lambda cell: reserve_lats[0] < cell < reserve_lats[1],
                         longitude=lambda cell: reserve_lons[0] < cell < reserve_lons[1],
                     )
@@ -69,8 +74,8 @@ def get_temporal_variables(
                 iris.analysis.MEAN,
                 weights=iris.analysis.cartography.area_weights(cube),
             )
-            # Carry out the calculation by realising data.
-            _ = dataset.cubes[i].data
+    # Carry out the calculation by realising data.
+    datasets.cubes.realise_data()
     return datasets
 
 
@@ -83,7 +88,7 @@ def get_avg_ba():
     return avg_ba
 
 
-def plot_burned_area_maps():
+def plot_burned_area_maps(figure_saver):
     """Plot burned area globally, and with a focus on the reserve."""
     avg_ba = get_avg_ba()
 
@@ -186,27 +191,102 @@ def plot_burned_area_maps():
 if __name__ == "__main__":
     # Workaround to allow plotting of cftime dates.
 
-    figure_saver = FigureSaver(directories="generating_genius", debug=True, dpi=600)
+    figure_saver = FigureSaver(
+        directories=os.path.join(os.path.expanduser("~"), "tmp", "generating_genius"),
+        debug=True,
+        dpi=500,
+    )
 
-    # plot_burned_area_maps()
+    # plot_burned_area_maps(figure_saver)
 
     # Plot a series of variables
     datasets = get_temporal_variables(
         (
+            "ERA5_CAPEPrecip",
             "ERA5_DryDayPeriod",
             "ERA5_Temperature",
-            "MCD64CMQ_C6",
             "HYDE",
-            "VODCA",
-            "ERA5_CAPEPrecip",
+            "MCD64CMQ_C6",
         ),
-        ("Dry Day Period", "Burned Area", "popd", "VOD Ku-band", "CAPE x PRECIP"),
+        (
+            "Burned Area",
+            "CAPE x Precip",
+            "Dry Day Period",
+            "Max Temp",
+            "Mean Temp",
+            "popd",
+            "cropland",
+        ),
     )
+    plot_data = {}
+    times = {}
+    data = {}
+    dataset_names = {}
+
     for dataset_name, dataset in zip(datasets.pretty_dataset_names, datasets):
         for variable_name, cube in zip(dataset.variable_names("pretty"), dataset):
-            plt.figure()
-            plt.title(f"{dataset_name}")
-            plt.plot(
-                cube.coord("time").units.num2date(cube.coord("time").points), cube.data
-            )
-            plt.show()
+            plot_data[variable_name] = {
+                "times": cube.coord("time").units.num2date(cube.coord("time").points),
+                "data": cube.data,
+                "dataset_name": dataset_name,
+            }
+    with figure_saver("individual_variables"):
+        fig, axes = plt.subplots(3, 2, sharex=True, figsize=(10, 10))
+
+        var = "MCD64CMQ BA"
+        ax = axes[0, 0]
+        ax.plot(
+            plot_data[var]["times"], plot_data[var]["data"],
+        )
+        ax.set_title("MCD64CMQ")
+        ax.set_ylabel("Burned Area Fraction")
+        ax.set_yscale("log")
+
+        var = "CAPE x Precip"
+        ax = axes[0, 1]
+        ax.plot(
+            plot_data[var]["times"], plot_data[var]["data"],
+        )
+        ax.set_title("ERA5")
+        ax.set_ylabel(var)
+
+        var = "Dry Day Period"
+        ax = axes[1, 0]
+        ax.plot(
+            plot_data[var]["times"], plot_data[var]["data"],
+        )
+        ax.set_title("ERA5")
+        ax.set_ylabel("Dry Day Period (days)")
+        # ax.set_yscale('log')
+
+        var = "Max Temp"
+        ax = axes[1, 1]
+        ax.plot(
+            plot_data[var]["times"], plot_data[var]["data"] - 273.15,
+        )
+        ax.set_title("ERA5")
+        ax.set_ylabel("Maximum Temperature (°C)")
+
+        var = "popd"
+        ax = axes[2, 0]
+        ax.plot(
+            plot_data[var]["times"], plot_data[var]["data"],
+        )
+        ax.set_title("HYDE")
+        ax.set_ylabel("Population Density")
+
+        var = "cropland"
+        ax = axes[2, 1]
+        ax.plot(
+            plot_data[var]["times"], plot_data[var]["data"],
+        )
+        ax.set_title("HYDE")
+        ax.set_ylabel("cropland")
+
+        for ax in axes.flatten():
+            ax.grid()
+
+        for ax in axes[-1, :]:
+            ax.set_xlabel("Date")
+        plt.subplots_adjust(wspace=0.22)
+    plt.close()

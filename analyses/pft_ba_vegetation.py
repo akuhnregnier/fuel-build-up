@@ -5,7 +5,6 @@ import os
 
 import matplotlib as mpl
 import numpy as np
-from joblib import Memory
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.model_selection import train_test_split
 
@@ -16,10 +15,11 @@ from wildfires.data.cube_aggregation import *
 from wildfires.data.datasets import *
 from wildfires.logging_config import enable_logging
 
+from ..qstat import get_ncpus
+
 logger = logging.getLogger(__name__)
 
-location = os.path.join(DATA_DIR, "joblib_cachedir")
-memory = Memory(location)
+memory = get_memory("analysis_pft_ba_vegetation")
 
 
 @memory.cache()

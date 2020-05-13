@@ -8,7 +8,6 @@ Several burned area datasets are investigated.
 import warnings
 from copy import deepcopy
 
-from joblib import Memory
 from tqdm import tqdm
 
 from wildfires.analysis.fire_season import thres_fire_season_stats
@@ -18,7 +17,7 @@ from wildfires.data.datasets import *
 from wildfires.logging_config import enable_logging
 from wildfires.utils import get_land_mask
 
-memory = Memory(DATA_DIR)
+memory = get_memory("analysis_meris_observed_area")
 
 
 @memory.cache
