@@ -1,14 +1,44 @@
 # -*- coding: utf-8 -*-
 import logging
+from functools import partial, reduce
+import math
 import os
 import re
 import sys
 import warnings
+import seaborn as sns
+import pandas as pd
+import scipy
+from operator import mul
+from collections import defaultdict
+from tqdm import tqdm
+from joblib import parallel_backend
+from alepython.ale import (
+    ale_plot, _second_order_ale_quant, _sci_format, _get_centres
+)
+from matplotlib.patches import Rectangle
+from itertools import combinations
+import dask.distributed
+from dask.distributed import Client
+from pdpbox import pdp
+
+import shap
+import concurrent.futures
 
 import matplotlib as mpl
 from loguru import logger as loguru_logger
+from sklearn.model_selection import train_test_split
 
-from wildfires.analysis import FigureSaver, data_processing
+from wildfires.utils import SimpleCache, Time
+from wildfires.analysis import (
+    FigureSaver,
+    data_processing,
+    constrained_map_plot,
+    corr_plot,
+    MidpointNormalize,
+    cube_plotting,
+    vif,
+)
 from wildfires.dask_cx1 import (
     DaskRandomForestRegressor,
     fit_dask_rf_grid_search_cv,
@@ -41,8 +71,12 @@ logger = logging.getLogger(__name__)
 enable_logging("jupyter")
 
 warnings.filterwarnings("ignore", ".*Collapsing a non-contiguous coordinate.*")
-warnings.filterwarnings("ignore", ".*DEFAULT_SPHERICAL_EARTH_RADIUS*")
-warnings.filterwarnings("ignore", ".*guessing contiguous bounds*")
+warnings.filterwarnings("ignore", ".*DEFAULT_SPHERICAL_EARTH_RADIUS.*")
+warnings.filterwarnings("ignore", ".*guessing contiguous bounds.*")
+
+warnings.filterwarnings(
+    "ignore", 'Setting feature_perturbation = "tree_path_dependent".*'
+)
 
 normal_coast_linewidth = 0.5
 mpl.rc("figure", figsize=(14, 6))
@@ -53,6 +87,9 @@ save_name = "fire_seasonality_paper"
 figure_saver = FigureSaver(directories=os.path.join("~", "tmp", save_name), debug=True)
 memory = get_memory(save_name, verbose=100)
 CACHE_DIR = os.path.join(DATA_DIR, ".pickle", save_name)
+
+data_split_cache = SimpleCache("data_split", cache_dir=CACHE_DIR)
+cross_val_cache = SimpleCache("rf_cross_val", cache_dir=CACHE_DIR)
 
 register_cl_backend()
 data_memory = get_memory("analysis_lags_rf_cross_val", backend="cloudpickle", verbose=2)
@@ -211,3 +248,21 @@ def get_offset_data(
         masked_datasets,
         land_mask,
     )
+
+
+def get_shap_values(rf, X, data=None, interaction=False):
+    """Calculate SHAP values for `X`.
+
+    When `data` is None, `feature_perturbation='tree_path_dependent'` by default.
+
+    """
+    if data is None:
+        feature_perturbation = "tree_path_dependent"
+    else:
+        feature_perturbation = "interventional"
+
+    explainer = shap.TreeExplainer(rf, data=data, feature_perturbation=feature_perturbation)
+
+    if interaction:
+        return explainer.shap_interaction_values(X)
+    return explainer.shap_values(X)
