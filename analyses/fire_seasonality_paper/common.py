@@ -1,42 +1,38 @@
 # -*- coding: utf-8 -*-
+import concurrent.futures
 import logging
-from functools import partial, reduce
 import math
 import os
 import re
 import sys
 import warnings
-import seaborn as sns
+from collections import defaultdict
+from functools import partial, reduce
+from itertools import combinations
+from operator import mul
+
+import dask.distributed
+import matplotlib as mpl
 import pandas as pd
 import scipy
-from operator import mul
-from collections import defaultdict
-from tqdm import tqdm
-from joblib import parallel_backend
-from alepython.ale import (
-    ale_plot, _second_order_ale_quant, _sci_format, _get_centres
-)
-from matplotlib.patches import Rectangle
-from itertools import combinations
-import dask.distributed
-from dask.distributed import Client
-from pdpbox import pdp
-
+import seaborn as sns
 import shap
-import concurrent.futures
-
-import matplotlib as mpl
+from alepython.ale import _get_centres, _sci_format, ale_plot, second_order_ale_quant
+from dask.distributed import Client
+from joblib import parallel_backend
 from loguru import logger as loguru_logger
+from matplotlib.patches import Rectangle
+from pdpbox import pdp
 from sklearn.model_selection import train_test_split
+from tqdm import tqdm
 
-from wildfires.utils import SimpleCache, Time
 from wildfires.analysis import (
     FigureSaver,
-    data_processing,
+    MidpointNormalize,
     constrained_map_plot,
     corr_plot,
-    MidpointNormalize,
     cube_plotting,
+    data_processing,
     vif,
 )
 from wildfires.dask_cx1 import (
@@ -62,6 +58,7 @@ from wildfires.data import (
 )
 from wildfires.joblib.cloudpickle_backend import register_backend as register_cl_backend
 from wildfires.logging_config import enable_logging
+from wildfires.utils import SimpleCache, Time
 
 loguru_logger.enable("alepython")
 loguru_logger.remove()
@@ -261,7 +258,9 @@ def get_shap_values(rf, X, data=None, interaction=False):
     else:
         feature_perturbation = "interventional"
 
-    explainer = shap.TreeExplainer(rf, data=data, feature_perturbation=feature_perturbation)
+    explainer = shap.TreeExplainer(
+        rf, data=data, feature_perturbation=feature_perturbation
+    )
 
     if interaction:
         return explainer.shap_interaction_values(X)
