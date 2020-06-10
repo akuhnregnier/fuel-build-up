@@ -13,19 +13,21 @@ from operator import mul
 
 import dask.distributed
 import matplotlib as mpl
+import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 import scipy
 import seaborn as sns
 import shap
-from alepython.ale import _get_centres, _sci_format, ale_plot, second_order_ale_quant
 from dask.distributed import Client
 from joblib import parallel_backend
 from loguru import logger as loguru_logger
 from matplotlib.patches import Rectangle
-from pdpbox import pdp
 from sklearn.model_selection import train_test_split
 from tqdm import tqdm
 
+from alepython import ale_plot
+from pdpbox import pdp
 from wildfires.analysis import (
     FigureSaver,
     MidpointNormalize,
@@ -33,11 +35,14 @@ from wildfires.analysis import (
     corr_plot,
     cube_plotting,
     data_processing,
+    map_model_output,
     vif,
 )
 from wildfires.dask_cx1 import (
     DaskRandomForestRegressor,
-    fit_dask_rf_grid_search_cv,
+    common_worker_threads,
+    dask_fit_loco,
+    fit_dask_sub_est_grid_search_cv,
     get_client,
 )
 from wildfires.data import (
@@ -54,11 +59,12 @@ from wildfires.data import (
     GFEDv4,
     GlobFluo_SIF,
     MOD15A2H_LAI_fPAR,
+    dummy_lat_lon_cube,
     get_memory,
 )
 from wildfires.joblib.cloudpickle_backend import register_backend as register_cl_backend
 from wildfires.logging_config import enable_logging
-from wildfires.utils import SimpleCache, Time
+from wildfires.utils import SimpleCache, Time, get_masked_array
 
 loguru_logger.enable("alepython")
 loguru_logger.remove()
@@ -265,3 +271,42 @@ def get_shap_values(rf, X, data=None, interaction=False):
     if interaction:
         return explainer.shap_interaction_values(X)
     return explainer.shap_values(X)
+
+
+def shorten_features(features):
+    if isinstance(features, str):
+        features = (features,)
+
+    def month_repl(match_obj):
+        return f"{match_obj.group(1)} M"
+
+    def delta_repl(match_obj):
+        return f"Δ{match_obj.group(1)} M"
+
+    replacements = {
+        "-(\d+) - .*Month$": delta_repl,
+        "-(\d+) Month$": month_repl,
+        "VOD Ku-band": "VOD",
+        "Diurnal Temp Range": "DTR",
+        "Dry Day Period": "Dry Days",
+        re.escape("SWI(1)"): "SWI",
+    }
+    formatted = []
+    for feature in features:
+        for pattern, repl in replacements.items():
+            feature = re.sub(pattern, repl, feature)
+        formatted.append(feature)
+
+    if len(formatted) == 1:
+        return formatted[0]
+    return formatted
+
+
+def shorten_columns(df, inplace=False):
+    return df.rename(
+        columns=dict(
+            (orig, short)
+            for orig, short in zip(df.columns, shorten_features(df.columns))
+        ),
+        inplace=inplace,
+    )
