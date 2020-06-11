@@ -29,12 +29,17 @@ repos:
             entry: clean_ipynb --no-autoflake
             language: system
             files: (__init__|common)\.py$
+          - id: only-black
+            name: only-black
+            entry: clean_ipynb --no-autoflake --no-isort
+            language: system
+            files: specific\.py$
           - id: python-clean
             name: python-clean
             entry: clean_ipynb --no-ipynb
             language: system
             files: \.py$
-            exclude: (__init__|common)\.py$
+            exclude: (__init__|common|specific)\.py$
             # - id: pytest
             #   name: pytest
             #   entry: pytest -v -rs -m "not slow" --ignore-glob='joblib/**/func_code.py'

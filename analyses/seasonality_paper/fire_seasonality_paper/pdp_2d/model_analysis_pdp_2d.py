@@ -6,21 +6,21 @@ from pathlib import Path
 from wildfires.qstat import get_ncpus
 from wildfires.utils import handle_array_job_args
 
-
-def func():
-    # Only import this here after the path modification carried out in the job script.
-    from common import (
-        data_split_cache,
-        cross_val_cache,
-        SimpleCache,
-        CACHE_DIR,
-        get_shap_values,
-        parallel_backend,
+try:
+    # This will only work after the path modification carried out in the job script.
+    from specific import (
         combinations,
+        cross_val_cache,
+        data_split_cache,
         figure_saver,
+        parallel_backend,
         pdp,
     )
+except ImportError:
+    """Not running as an HPC job yet."""
 
+
+def func():
     def save_pdp_plot_2d(model, X_train, features, n_jobs):
         model.n_jobs = n_jobs
         with parallel_backend("threading", n_jobs=n_jobs):
@@ -55,7 +55,7 @@ def func():
 
 if __name__ == "__main__":
     handle_array_job_args(
-        Path(__file__).absolute(),
+        Path(__file__).resolve(),
         func,
         ncpus=8,
         mem="90gb",

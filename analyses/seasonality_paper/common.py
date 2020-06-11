@@ -3,6 +3,7 @@ import concurrent.futures
 import logging
 import math
 import os
+import pickle
 import re
 import sys
 import warnings
@@ -96,17 +97,6 @@ warnings.filterwarnings(
 normal_coast_linewidth = 0.5
 mpl.rc("figure", figsize=(14, 6))
 mpl.rc("font", size=9.0)
-
-save_name = "fire_seasonality_paper"
-
-PROJECT_DIR = Path(os.path.dirname(os.path.abspath(__file__)))
-
-figure_saver = FigureSaver(directories=os.path.join("~", "tmp", save_name), debug=True)
-memory = get_memory(save_name, verbose=100)
-CACHE_DIR = Path(os.path.join(DATA_DIR, ".pickle", save_name))
-
-data_split_cache = SimpleCache("data_split", cache_dir=CACHE_DIR)
-cross_val_cache = SimpleCache("rf_cross_val", cache_dir=CACHE_DIR)
 
 register_cl_backend()
 data_memory = get_memory("analysis_lags_rf_cross_val", backend="cloudpickle", verbose=2)
@@ -288,7 +278,7 @@ def get_shap_values(rf, X, data=None, interaction=False):
 
 
 def save_ale_2d_and_get_importance(
-    model, train_set, features, n_jobs=8, include_first_order=False
+    model, train_set, features, n_jobs=8, include_first_order=False, figure_saver=None
 ):
     model.n_jobs = n_jobs
 
@@ -317,11 +307,12 @@ def save_ale_2d_and_get_importance(
     for ax_key in ("ale", "quantiles_x"):
         axes[ax_key].xaxis.set_tick_params(rotation=45)
 
-    figure_saver.save_figure(
-        fig,
-        "__".join(features),
-        sub_directory="2d_ale_first_order" if include_first_order else "2d_ale",
-    )
+    if figure_saver is not None:
+        figure_saver.save_figure(
+            fig,
+            "__".join(features),
+            sub_directory="2d_ale_first_order" if include_first_order else "2d_ale",
+        )
 
     #     min_samples = (
     #         train_set.shape[0] / reduce(mul, map(lambda x: len(x) - 1, quantiles_list))
@@ -333,7 +324,7 @@ def save_ale_2d_and_get_importance(
     return np.ptp(ale)
 
 
-def save_pdp_plot_2d(model, X_train, features, n_jobs):
+def save_pdp_plot_2d(model, X_train, features, n_jobs, figure_saver=None):
     model.n_jobs = n_jobs
     with parallel_backend("threading", n_jobs=n_jobs):
         pdp_interact_out = pdp.pdp_interact(
@@ -345,10 +336,11 @@ def save_pdp_plot_2d(model, X_train, features, n_jobs):
         )
 
     fig, axes = pdp.pdp_interact_plot(
-        pdp_interact_out, features, x_quantile=True, figsize=(7, 8),
+        pdp_interact_out, features, x_quantile=True, figsize=(7, 8)
     )
     axes["pdp_inter_ax"].xaxis.set_tick_params(rotation=45)
-    figure_saver.save_figure(fig, "__".join(features), sub_directory="pdp_2d")
+    if figure_saver is not None:
+        figure_saver.save_figure(fig, "__".join(features), sub_directory="pdp_2d")
 
 
 def save_ale_plot_1d_with_ptp(
@@ -361,6 +353,7 @@ def save_ale_plot_1d_with_ptp(
     verbose=False,
     monte_carlo=True,
     center=False,
+    figure_saver=None,
 ):
     model.n_jobs = n_jobs
     with parallel_backend("threading", n_jobs=n_jobs):
@@ -393,7 +386,8 @@ def save_ale_plot_1d_with_ptp(
         axes[ax_key].xaxis.set_tick_params(rotation=45)
 
     sub_dir = "ale" if monte_carlo else "ale_non_mc"
-    figure_saver.save_figure(fig, column, sub_directory=sub_dir)
+    if figure_saver is not None:
+        figure_saver.save_figure(fig, column, sub_directory=sub_dir)
 
     if monte_carlo:
         mc_ales = np.array([])
@@ -404,7 +398,7 @@ def save_ale_plot_1d_with_ptp(
         return np.ptp(data[1])
 
 
-def save_pdp_plot_1d(model, X_train, column, n_jobs):
+def save_pdp_plot_1d(model, X_train, column, n_jobs, CACHE_DIR, figure_saver=None):
     data_file = os.path.join(CACHE_DIR, "pdp_data", column)
 
     if not os.path.isfile(data_file):
@@ -435,7 +429,8 @@ def save_pdp_plot_1d(model, X_train, column, n_jobs):
         figsize=(7, 5),
     )
     axes_ice["pdp_ax"].xaxis.set_tick_params(rotation=45)
-    figure_saver.save_figure(fig_ice, column, sub_directory="pdp")
+    if figure_saver is not None:
+        figure_saver.save_figure(fig_ice, column, sub_directory="pdp")
 
     # Without ICEs.
     fig_no_ice, ax = plt.subplots(figsize=(7.5, 4.5))
@@ -448,7 +443,8 @@ def save_pdp_plot_1d(model, X_train, column, n_jobs):
     plt.xlabel(f"{column}")
     plt.title(f"PDP of feature '{column}'\nBins: {len(pdp_isolate_out.pdp)}")
     plt.grid(alpha=0.4, linestyle="--")
-    figure_saver.save_figure(fig_no_ice, column, sub_directory="pdp_no_ice")
+    if figure_saver is not None:
+        figure_saver.save_figure(fig_no_ice, column, sub_directory="pdp_no_ice")
     return (fig_ice, fig_no_ice), pdp_isolate_out, data_file
 
 
@@ -462,6 +458,7 @@ def multi_ale_plot_1d(
     title=None,
     n_jobs=8,
     verbose=False,
+    figure_saver=None,
 ):
     fig, ax = plt.subplots(
         figsize=(7.5, 4.5)
@@ -508,4 +505,5 @@ def multi_ale_plot_1d(
     ax.set_xlabel(xlabel)
     ax.set_ylabel(ylabel)
 
-    figure_saver.save_figure(fig, fig_name, sub_directory="multi_ale")
+    if figure_saver is not None:
+        figure_saver.save_figure(fig, fig_name, sub_directory="multi_ale")

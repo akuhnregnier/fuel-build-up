@@ -5,20 +5,24 @@ from pathlib import Path
 
 from wildfires.utils import handle_array_job_args
 
+try:
+    # This will only work after the path modification carried out in the job script.
+    from specific import (
+        CACHE_DIR,
+        SimpleCache,
+        cross_val_cache,
+        data_split_cache,
+        get_shap_values,
+    )
+except ImportError:
+    """Not running as an HPC job yet."""
+
+
 # About 2 s / sample
 # Expect ~ 1 hr per job -> 2000 samples in 2 hrs each (allowing for poor performance)
 
 
 def func():
-    # Only import this here after the path modification carried out in the job script.
-    from common import (
-        data_split_cache,
-        cross_val_cache,
-        SimpleCache,
-        CACHE_DIR,
-        get_shap_values,
-    )
-
     # Used to re-compute specific failed jobs, `None` otherwise.
     indices = [
         14,
@@ -149,7 +153,7 @@ def func():
 
 if __name__ == "__main__":
     handle_array_job_args(
-        Path(__file__).absolute(),
+        Path(__file__).resolve(),
         func,
         ncpus=1,
         mem="5gb",
