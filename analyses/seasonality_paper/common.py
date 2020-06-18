@@ -8,7 +8,7 @@ import re
 import sys
 import warnings
 from collections import defaultdict
-from functools import partial, reduce
+from functools import partial, reduce, wraps
 from itertools import combinations
 from operator import mul
 from pathlib import Path
@@ -29,6 +29,8 @@ from hsluv import hsluv_to_rgb, rgb_to_hsluv
 from joblib import Parallel, delayed, parallel_backend
 from loguru import logger as loguru_logger
 from matplotlib.patches import Rectangle
+from sklearn.base import clone
+from sklearn.metrics import mean_squared_error, r2_score
 from sklearn.model_selection import train_test_split
 from tqdm.auto import tqdm
 
@@ -45,10 +47,12 @@ from wildfires.analysis import (
     vif,
 )
 from wildfires.dask_cx1 import (
+    CachedResults,
     DaskRandomForestRegressor,
     common_worker_threads,
     dask_fit_loco,
     fit_dask_sub_est_grid_search_cv,
+    fit_dask_sub_est_random_search_cv,
     get_client,
     get_parallel_backend,
 )
@@ -507,3 +511,16 @@ def multi_ale_plot_1d(
 
     if figure_saver is not None:
         figure_saver.save_figure(fig, fig_name, sub_directory="multi_ale")
+
+
+def add_common_path_deco(f):
+    """Add path to 'common' before executing a function remotely."""
+    COMMON_DIR = Path(__file__).resolve().parent
+    # Adding wraps(f) here causes issues with an unmodified path.
+    def path_f(*args, **kwargs):
+        if sys.path[0] != str(COMMON_DIR):
+            sys.path.insert(0, str(COMMON_DIR))
+        # Call the original function.
+        return f(*args, **kwargs)
+
+    return path_f
