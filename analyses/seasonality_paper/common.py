@@ -75,10 +75,13 @@ from wildfires.data import (
 )
 from wildfires.joblib.cloudpickle_backend import register_backend as register_cl_backend
 from wildfires.logging_config import enable_logging
+from wildfires.qstat import get_ncpus
 from wildfires.utils import (
+    NoCachedDataError,
     SimpleCache,
     Time,
     get_masked_array,
+    get_unmasked,
     shorten_columns,
     shorten_features,
 )
