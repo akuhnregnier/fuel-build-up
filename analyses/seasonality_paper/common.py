@@ -32,7 +32,6 @@ from matplotlib.patches import Rectangle
 from sklearn.base import clone
 from sklearn.metrics import mean_squared_error, r2_score
 from sklearn.model_selection import train_test_split
-from tqdm.auto import tqdm
 
 from alepython.ale import _sci_format, ale_plot, first_order_ale_quant
 from pdpbox import pdp
@@ -85,6 +84,11 @@ from wildfires.utils import (
     shorten_columns,
     shorten_features,
 )
+
+if "TQDMAUTO" in os.environ:
+    from tqdm.auto import tqdm
+else:
+    from tqdm import tqdm
 
 loguru_logger.enable("alepython")
 loguru_logger.remove()
