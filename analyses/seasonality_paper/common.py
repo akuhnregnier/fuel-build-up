@@ -14,6 +14,7 @@ from operator import mul
 from pathlib import Path
 from time import time
 
+import cartopy.crs as ccrs
 import cloudpickle
 import dask.distributed
 import eli5
@@ -28,6 +29,7 @@ from dask.distributed import Client
 from hsluv import hsluv_to_rgb, rgb_to_hsluv
 from joblib import Parallel, delayed, parallel_backend
 from loguru import logger as loguru_logger
+from matplotlib.colors import SymLogNorm
 from matplotlib.patches import Rectangle
 from sklearn.base import clone
 from sklearn.metrics import mean_squared_error, r2_score
@@ -289,12 +291,29 @@ def get_shap_values(rf, X, data=None, interaction=False):
 
 
 def save_ale_2d_and_get_importance(
-    model, train_set, features, n_jobs=8, include_first_order=False, figure_saver=None
+    model,
+    train_set,
+    features,
+    n_jobs=8,
+    include_first_order=False,
+    figure_saver=None,
+    plot_samples=True,
+    figsize=None,
 ):
     model.n_jobs = n_jobs
 
+    if figsize is None:
+        if plot_samples:
+            figsize = (10, 4.5)
+        else:
+            figsize = (7.5, 4.5)
+
     fig, ax = plt.subplots(
-        figsize=(7.5, 4.5)
+        1,
+        2 if plot_samples else 1,
+        figsize=figsize,
+        gridspec_kw={"width_ratios": [1.7, 1]} if plot_samples else None,
+        constrained_layout=True if plot_samples else False,
     )  # Make sure plot is plotted onto a new figure.
     with parallel_backend("threading", n_jobs=n_jobs):
         fig, axes, (quantiles_list, ale, samples) = ale_plot(
@@ -303,11 +322,17 @@ def save_ale_2d_and_get_importance(
             features,
             bins=20,
             fig=fig,
-            ax=ax,
+            ax=ax[0] if plot_samples else ax,
             plot_quantiles=True,
             quantile_axis=True,
             plot_kwargs={
-                "colorbar_kwargs": dict(format="%.0e", pad=0.09, aspect=32, shrink=0.85)
+                "colorbar_kwargs": dict(
+                    format="%.0e",
+                    pad=0.02 if plot_samples else 0.09,
+                    aspect=32,
+                    shrink=0.85,
+                    ax=ax[0] if plot_samples else ax,
+                ),
             },
             return_data=True,
             n_jobs=n_jobs,
@@ -317,6 +342,27 @@ def save_ale_2d_and_get_importance(
     # plt.subplots_adjust(top=0.89)
     for ax_key in ("ale", "quantiles_x"):
         axes[ax_key].xaxis.set_tick_params(rotation=45)
+
+    if plot_samples:
+        # Plotting samples.
+        ax[1].set_title("Samples")
+        # ax[1].set_xlabel(f"Feature '{features[0]}'")
+        # ax[1].set_ylabel(f"Feature '{features[1]}'")
+        mod_quantiles_list = []
+        for axis, quantiles in zip(("x", "y"), quantiles_list):
+            inds = np.arange(len(quantiles))
+            mod_quantiles_list.append(inds)
+            ax[1].set(**{f"{axis}ticks": inds})
+            ax[1].set(**{f"{axis}ticklabels": _sci_format(quantiles, scilim=0.6)})
+        samples_img = ax[1].pcolormesh(
+            *mod_quantiles_list, samples.T, norm=SymLogNorm(linthresh=1)
+        )
+        fig.colorbar(samples_img, ax=ax, shrink=0.6, pad=0.01)
+        ax[1].xaxis.set_tick_params(rotation=90)
+        ax[1].set_aspect("equal")
+        fig.set_constrained_layout_pads(
+            w_pad=0.000, h_pad=0.000, hspace=0.0, wspace=0.015
+        )
 
     if figure_saver is not None:
         figure_saver.save_figure(
