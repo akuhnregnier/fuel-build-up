@@ -95,8 +95,7 @@ def load_experiment_data(folders):
 
 
 def multi_model_ale_plot_1d(
-    model_X_cols,
-    plot_kwargs_list,
+    model_X_cols_kwargs,
     fig_name,
     xlabel=None,
     ylabel=None,
@@ -104,23 +103,33 @@ def multi_model_ale_plot_1d(
     n_jobs=8,
     verbose=False,
     figure_saver=None,
-    figsize=(7.5, 4.5),
+    figsize=(8, 2),
 ):
-    fig, ax = plt.subplots(
-        figsize=figsize
-    )  # Make sure plot is plotted onto a new figure.
-    with parallel_backend("threading", n_jobs=n_jobs):
-        quantile_list = []
-        ale_list = []
-        for model, X_train, feature in tqdm(
-            model_X_cols, desc="Calculating feature ALEs", disable=not verbose
-        ):
-            model.n_jobs = n_jobs
-            quantiles, ale = first_order_ale_quant(
-                model.predict, X_train, feature, bins=20
-            )
-            quantile_list.append(quantiles)
-            ale_list.append(ale)
+    fig, ax = plt.subplots(figsize=figsize)  # Make sure to plot on a new figure.
+    quantile_list = []
+    ale_list = []
+    for experiment, data_dict, feature, _ in tqdm(
+        model_X_cols_kwargs, desc="Calculating feature ALEs", disable=not verbose
+    ):
+        bins = 20
+        cache = SimpleCache(
+            f"{experiment}_{feature}_ale_{bins}",
+            cache_dir=CACHE_DIR / "ale",
+            verbose=10 if verbose else 0,
+        )
+        try:
+            quantiles, ale = cache.load()
+        except NoCachedDataError:
+            with parallel_backend("threading", n_jobs=n_jobs):
+                model = data_dict[experiment]["model"]
+                model.n_jobs = n_jobs
+                quantiles, ale = first_order_ale_quant(
+                    model.predict, data_dict[experiment]["X_train"], feature, bins=bins
+                )
+                cache.save((quantiles, ale))
+
+        quantile_list.append(quantiles)
+        ale_list.append(ale)
 
     # Construct quantiles from the individual quantiles, minimising the amount of interpolation.
     combined_quantiles = np.vstack([quantiles[None] for quantiles in quantile_list])
@@ -131,7 +140,9 @@ def multi_model_ale_plot_1d(
     final_quantiles[-1] = np.max(combined_quantiles)
 
     mod_quantiles = np.arange(len(quantiles))
-    for plot_kwargs, quantiles, ale in zip(plot_kwargs_list, quantile_list, ale_list):
+    for (_, _, _, plot_kwargs), quantiles, ale in zip(
+        model_X_cols_kwargs, quantile_list, ale_list
+    ):
         # Interpolate each of the quantiles relative to the accumulated final quantiles.
         ax.plot(
             np.interp(quantiles, final_quantiles, mod_quantiles),

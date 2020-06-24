@@ -137,6 +137,17 @@ experiment_color_dict.update(
     }
 )
 
+experiment_markers = ["<", "o", ">"]
+experiment_marker_dict = {
+    experiment: marker for experiment, marker in zip(experiments, experiment_markers)
+}
+experiment_marker_dict.update(
+    {
+        experiment_name_dict[experiment]: experiment_marker_dict[experiment]
+        for experiment in experiments
+    }
+)
+
 # Creating the Data Structures used for Fitting
 @data_memory.cache
 def get_data(
