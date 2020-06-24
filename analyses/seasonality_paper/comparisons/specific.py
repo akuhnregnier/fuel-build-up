@@ -22,6 +22,8 @@ figure_saver = FigureSaver(
     directories=Path("~") / "tmp" / PROJECT_DIR.parent.name / PROJECT_DIR.name,
     debug=True,
 )
+map_figure_saver = figure_saver(**map_figure_saver_kwargs)
+
 memory = get_memory("__".join((PROJECT_DIR.parent.name, PROJECT_DIR.name)), verbose=100)
 CACHE_DIR = Path(DATA_DIR) / ".pickle" / PROJECT_DIR.parent.name / PROJECT_DIR.name
 

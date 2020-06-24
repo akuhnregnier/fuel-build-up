@@ -29,7 +29,7 @@ from dask.distributed import Client
 from hsluv import hsluv_to_rgb, rgb_to_hsluv
 from joblib import Parallel, delayed, parallel_backend
 from loguru import logger as loguru_logger
-from matplotlib.colors import SymLogNorm
+from matplotlib.colors import SymLogNorm, from_levels_and_colors
 from matplotlib.patches import Rectangle
 from sklearn.base import clone
 from sklearn.metrics import mean_squared_error, r2_score
@@ -107,13 +107,35 @@ warnings.filterwarnings(
     "ignore", 'Setting feature_perturbation = "tree_path_dependent".*'
 )
 
-normal_coast_linewidth = 0.5
+normal_coast_linewidth = 0.3
 mpl.rc("figure", figsize=(14, 6))
 mpl.rc("font", size=9.0)
 
 register_cl_backend()
 data_memory = get_memory("analysis_lags_rf_cross_val", backend="cloudpickle", verbose=2)
 
+map_figure_saver_kwargs = {"dpi": 1200}
+
+# 9 colors used to differentiate varying the lags throughout.
+lags = [0, 1, 3, 6, 9, 12, 18, 24]
+lag_colors = sns.color_palette("Set1", desat=0.85)
+lag_color_dict = {lag: color for lag, color in zip(lags, lag_colors)}
+
+experiments = ["fire_seasonality_paper", "15_most_important", "no_temporal_shifts"]
+experiment_colors = sns.color_palette("Set2")
+experiment_color_dict = {
+    experiment: color for experiment, color in zip(experiments, experiment_colors)
+}
+experiment_name_dict = {
+    experiment: name
+    for experiment, name in zip(experiments, ["all features", "top 15", "no lags"])
+}
+experiment_color_dict.update(
+    {
+        experiment_name_dict[experiment]: experiment_color_dict[experiment]
+        for experiment in experiments
+    }
+)
 
 # Creating the Data Structures used for Fitting
 @data_memory.cache
@@ -332,7 +354,7 @@ def save_ale_2d_and_get_importance(
                     aspect=32,
                     shrink=0.85,
                     ax=ax[0] if plot_samples else ax,
-                ),
+                )
             },
             return_data=True,
             n_jobs=n_jobs,
@@ -577,3 +599,51 @@ def add_common_path_deco(f):
         return f(*args, **kwargs)
 
     return path_f
+
+
+def get_lag(feature, target_feature=None):
+    """Return the lag duration as an integer.
+
+    Optionally a specific target feature can be required.
+
+    Args:
+        feature (str): Feature to extract month from.
+        target_feature (str): If given, this feature is required for a successful
+            match.
+
+    Returns:
+        int or None: For successful matches (see `target_feature`), an int
+            representing the lag duration is returned. Otherwise, `None` is returned.
+
+    """
+    if target_feature is None:
+        target_feature = ".*"
+    else:
+        target_feature = re.escape(target_feature)
+
+    match = re.search(target_feature + r"\s-(\d+)\s", feature)
+    if match is not None:
+        return int(match.groups(default="0")[0])
+    if match is None and re.match(target_feature, feature):
+        return 0
+    return None
+
+
+def filter_by_month(features, target_feature, max_month):
+    """Filter feature names using a single target feature and maximum month.
+
+    Args:
+        features (iterable of str): Feature names to select from.
+        target_feature (str): String in `features` to match against.
+        max_month (int): Maximum month.
+
+    Returns:
+        iterable of str: The filtered feature names, subset of `features`.
+
+    """
+    filtered = []
+    for feature in features:
+        lag = get_lag(feature, target_feature=target_feature)
+        if lag is not None and lag <= max_month:
+            filtered.append(feature)
+    return filtered
