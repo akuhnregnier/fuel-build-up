@@ -8,6 +8,7 @@ import re
 import sys
 import warnings
 from collections import defaultdict
+from datetime import datetime
 from functools import partial, reduce, wraps
 from itertools import combinations
 from operator import mul
@@ -45,6 +46,7 @@ from wildfires.analysis import (
     cube_plotting,
     data_processing,
     map_model_output,
+    print_dataset_times,
     vif,
 )
 from wildfires.dask_cx1 import (
@@ -71,6 +73,7 @@ from wildfires.data import (
     GFEDv4,
     GlobFluo_SIF,
     MOD15A2H_LAI_fPAR,
+    dataset_times,
     dummy_lat_lon_cube,
     get_memory,
 )
@@ -112,7 +115,8 @@ mpl.rc("figure", figsize=(14, 6))
 mpl.rc("font", size=9.0)
 
 register_cl_backend()
-data_memory = get_memory("analysis_lags_rf_cross_val", backend="cloudpickle", verbose=2)
+PAPER_DIR = Path(__file__).resolve().parent
+data_memory = get_memory(PAPER_DIR.name, backend="cloudpickle", verbose=2)
 
 map_figure_saver_kwargs = {"dpi": 1200}
 
