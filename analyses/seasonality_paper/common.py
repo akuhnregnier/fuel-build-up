@@ -125,7 +125,7 @@ lags = [0, 1, 3, 6, 9, 12, 18, 24]
 lag_colors = sns.color_palette("Set1", desat=0.85)
 lag_color_dict = {lag: color for lag, color in zip(lags, lag_colors)}
 
-experiments = ["fire_seasonality_paper", "15_most_important", "no_temporal_shifts"]
+experiments = ["all", "15_most_important", "no_temporal_shifts"]
 experiment_colors = sns.color_palette("Set2")
 experiment_color_dict = {
     experiment: color for experiment, color in zip(experiments, experiment_colors)
