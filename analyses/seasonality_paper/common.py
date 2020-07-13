@@ -27,6 +27,7 @@ import scipy
 import seaborn as sns
 import shap
 from dask.distributed import Client
+from dateutil.relativedelta import relativedelta
 from hsluv import hsluv_to_rgb, rgb_to_hsluv
 from joblib import Parallel, delayed, parallel_backend
 from loguru import logger as loguru_logger
@@ -155,7 +156,10 @@ experiment_marker_dict.update(
 # Creating the Data Structures used for Fitting
 @data_memory.cache
 def get_data(
-    shift_months=[1, 3, 6, 9, 12, 18, 24], selection_variables=None, masks=None
+    shift_months=[1, 3, 6, 9, 12, 18, 24],
+    selection_variables=None,
+    masks=None,
+    n_months=3,
 ):
     target_variable = "GFED4 BA"
 
@@ -166,21 +170,60 @@ def get_data(
 
     selection_datasets = [
         AvitabileThurnerAGB(),
-        Copernicus_SWI(),
+        # Copernicus_SWI(),
         ERA5_Temperature(),
         ESA_CCI_Landcover_PFT(),
         GFEDv4(),
         HYDE(),
         WWLLN(),
     ]
-    # These datasets will potentially be shifted.
-    datasets_to_shift = [
-        ERA5_DryDayPeriod(),
-        MOD15A2H_LAI_fPAR(),
-        VODCA(),
-        GlobFluo_SIF(),
+
+    # Datasets subject to temporal interpolation.
+    temporal_interp_datasets = [
+        Datasets(Copernicus_SWI()).select_variables(("SWI(1)",)).dataset
     ]
+
+    # Datasets subject to interpolation and shifting.
+    shift_and_interp_datasets = [
+        Datasets(MOD15A2H_LAI_fPAR()).select_variables(("FAPAR", "LAI")).dataset,
+        Datasets(VODCA()).select_variables(("VOD Ku-band",)).dataset,
+        Datasets(GlobFluo_SIF()).select_variables(("SIF",)).dataset,
+    ]
+
+    # These datasets may be shifted.
+    datasets_to_shift = [
+        Datasets(ERA5_DryDayPeriod()).select_variables(("Dry Day Period",)).dataset
+    ]
+
+    # Determine shared temporal extent of the data.
+    min_time, max_time = dataset_times(
+        selection_datasets
+        + temporal_interp_datasets
+        + shift_and_interp_datasets
+        + datasets_to_shift
+    )[:2]
+    interp_min_time, interp_max_time = dataset_times(
+        temporal_interp_datasets + shift_and_interp_datasets
+    )[:2]
+    target_timespan = (
+        max(min_time, interp_min_time + relativedelta(months=+n_months)),
+        min(max_time, interp_max_time - relativedelta(months=+n_months)),
+    )
+
+    # Carry out the temporal NN interpolation.
+    for i, dataset in enumerate(temporal_interp_datasets):
+        temporal_interp_datasets[i] = dataset.get_temporally_interpolated_dataset(
+            target_timespan, n_months
+        )
+    for i, dataset in enumerate(shift_and_interp_datasets):
+        shift_and_interp_datasets[i] = dataset.get_temporally_interpolated_dataset(
+            target_timespan, n_months
+        )
+
+    datasets_to_shift.extend(shift_and_interp_datasets)
     selection_datasets += datasets_to_shift
+    selection_datasets += temporal_interp_datasets
+
     if shift_months is not None:
         for shift in shift_months:
             for shift_dataset in datasets_to_shift:
@@ -195,14 +238,14 @@ def get_data(
             "AGB Tree",
             "Diurnal Temp Range",
             "Dry Day Period",
-            "FAPAR",
-            "LAI",
+            f"FAPAR {n_months}NN",
+            f"LAI {n_months}NN",
             "Max Temp",
-            "SIF",
-            "SWI(1)",
+            f"SIF {n_months}NN",
+            f"SWI(1) {n_months}NN",
             "ShrubAll",
             "TreeAll",
-            "VOD Ku-band",
+            f"VOD Ku-band {n_months}NN",
             "lightning",
             "pftCrop",
             "pftHerb",
@@ -212,11 +255,11 @@ def get_data(
             for shift in shift_months:
                 selection_variables.extend(
                     [
-                        f"LAI {-shift} Month",
-                        f"FAPAR {-shift} Month",
+                        f"LAI {n_months}NN {-shift} Month",
+                        f"FAPAR {n_months}NN {-shift} Month",
                         f"Dry Day Period {-shift} Month",
-                        f"VOD Ku-band {-shift} Month",
-                        f"SIF {-shift} Month",
+                        f"VOD Ku-band {n_months}NN {-shift} Month",
+                        f"SIF {n_months}NN {-shift} Month",
                     ]
                 )
 
@@ -252,7 +295,10 @@ def get_data(
 
 @data_memory.cache
 def get_offset_data(
-    shift_months=[1, 3, 6, 9, 12, 18, 24], selection_variables=None, masks=None
+    shift_months=[1, 3, 6, 9, 12, 18, 24],
+    selection_variables=None,
+    masks=None,
+    n_months=3,
 ):
     (
         endog_data,
@@ -262,7 +308,10 @@ def get_offset_data(
         masked_datasets,
         land_mask,
     ) = get_data(
-        shift_months=shift_months, selection_variables=selection_variables, masks=masks
+        shift_months=shift_months,
+        selection_variables=selection_variables,
+        masks=masks,
+        n_months=n_months,
     )
 
     to_delete = []
