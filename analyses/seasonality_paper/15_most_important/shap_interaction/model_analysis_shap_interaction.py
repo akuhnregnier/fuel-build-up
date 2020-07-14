@@ -10,7 +10,7 @@ try:
     from specific import (
         CACHE_DIR,
         SimpleCache,
-        cross_val_cache,
+        get_model,
         data_split_cache,
         get_shap_values,
     )
@@ -30,7 +30,7 @@ def func():
     print("Index:", index)
 
     X_train, X_test, y_train, y_test = data_split_cache.load()
-    results, rf = cross_val_cache.load()
+    rf = get_model()
 
     job_samples = 50
 
@@ -40,10 +40,10 @@ def func():
     )
 
     @tree_path_dependent_shap_interact_cache
-    def get_interact_shap_values(model, X):
+    def cached_get_interact_shap_values(model, X):
         return get_shap_values(model, X, interaction=True)
 
-    get_interact_shap_values(
+    cached_get_interact_shap_values(
         rf, X_train[index * job_samples : (index + 1) * job_samples]
     )
 
@@ -53,7 +53,7 @@ if __name__ == "__main__":
         Path(__file__).resolve(),
         func,
         ncpus=1,
-        mem="5gb",
-        walltime="08:00:00",
-        max_index=5000,
+        mem="7gb",
+        walltime="10:00:00",
+        max_index=5999,
     )

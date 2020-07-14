@@ -4,7 +4,7 @@ import warnings
 from pathlib import Path
 
 PROJECT_DIR = Path(__file__).resolve().parent
-if sys.path[0] != str(PROJECT_DIR.parent):
+if str(PROJECT_DIR.parent) not in sys.path:
     sys.path.insert(0, str(PROJECT_DIR.parent))
 
 warnings.filterwarnings(
@@ -26,7 +26,6 @@ memory = get_memory("__".join((PROJECT_DIR.parent.name, PROJECT_DIR.name)), verb
 CACHE_DIR = Path(DATA_DIR) / ".pickle" / PROJECT_DIR.parent.name / PROJECT_DIR.name
 
 data_split_cache = SimpleCache("data_split", cache_dir=CACHE_DIR)
-cross_val_cache = SimpleCache("rf_cross_val", cache_dir=CACHE_DIR)
 
 save_ale_2d_and_get_importance = partial(
     save_ale_2d_and_get_importance, figure_saver=figure_saver
@@ -114,3 +113,7 @@ def get_offset_data(*args, **kwargs):
         masked_datasets,
         land_mask,
     )
+
+
+def get_model(X_train=None, y_train=None):
+    return common_get_model(cache_dir=CACHE_DIR, X_train=X_train, y_train=y_train)

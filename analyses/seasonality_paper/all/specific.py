@@ -34,7 +34,9 @@ save_pdp_plot_2d = partial(save_pdp_plot_2d, figure_saver=figure_saver)
 save_ale_plot_1d_with_ptp = partial(
     save_ale_plot_1d_with_ptp, figure_saver=figure_saver
 )
-save_pdp_plot_1d = partial(save_pdp_plot_1d, figure_saver=figure_saver)
+save_pdp_plot_1d = partial(
+    save_pdp_plot_1d, CACHE_DIR=CACHE_DIR, figure_saver=figure_saver
+)
 multi_ale_plot_1d = partial(multi_ale_plot_1d, figure_saver=figure_saver)
 
 
