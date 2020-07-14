@@ -10,7 +10,7 @@ try:
     # This will only work after the path modification carried out in the job script.
     from specific import (
         combinations,
-        cross_val_cache,
+        get_model,
         data_split_cache,
         figure_saver,
         parallel_backend,
@@ -39,7 +39,7 @@ def func():
         figure_saver.save_figure(fig, "__".join(features), sub_directory="pdp_2d")
 
     X_train, X_test, y_train, y_test = data_split_cache.load()
-    results, rf = cross_val_cache.load()
+    rf = get_model()
     columns_list = list(combinations(X_train.columns, 2))
 
     index = int(os.environ["PBS_ARRAY_INDEX"])

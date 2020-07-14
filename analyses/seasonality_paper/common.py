@@ -153,13 +153,55 @@ experiment_marker_dict.update(
     }
 )
 
+
+# Specify common RF (training) params.
+n_splits = 5
+
+default_param_dict = {
+    "random_state": 1,
+    "bootstrap": True,
+}
+
+param_dict = {
+    **default_param_dict,
+    "ccp_alpha": 0.0,
+    "max_depth": 18,
+    "max_features": "auto",
+    "min_samples_leaf": 2,
+    "min_samples_split": 2,
+    "n_estimators": 500,
+}
+
+
+def common_get_model(cache_dir, X_train=None, y_train=None):
+    cached = CachedResults(
+        estimator_class=DaskRandomForestRegressor,
+        n_splits=n_splits,
+        cache_dir=cache_dir,
+    )
+    model = DaskRandomForestRegressor(**param_dict)
+    model_key = tuple(sorted(model.get_params().items()))
+    try:
+        model = cached.get_estimator(model_key)
+    except KeyError:
+        with parallel_backend("dask"):
+            model.fit(X_train, y_train)
+        cached.store_estimator(model_key, model)
+    model.n_jobs = get_ncpus()
+    return model
+
+
+# Data params.
+n_months = 3
+
+
 # Creating the Data Structures used for Fitting
 @data_memory.cache
 def get_data(
     shift_months=[1, 3, 6, 9, 12, 18, 24],
     selection_variables=None,
     masks=None,
-    n_months=3,
+    n_months=n_months,
 ):
     target_variable = "GFED4 BA"
 
@@ -298,7 +340,7 @@ def get_offset_data(
     shift_months=[1, 3, 6, 9, 12, 18, 24],
     selection_variables=None,
     masks=None,
-    n_months=3,
+    n_months=n_months,
 ):
     (
         endog_data,
@@ -657,7 +699,7 @@ def add_common_path_deco(f):
     COMMON_DIR = Path(__file__).resolve().parent
     # Adding wraps(f) here causes issues with an unmodified path.
     def path_f(*args, **kwargs):
-        if sys.path[0] != str(COMMON_DIR):
+        if str(COMMON_DIR) not in sys.path:
             sys.path.insert(0, str(COMMON_DIR))
         # Call the original function.
         return f(*args, **kwargs)
