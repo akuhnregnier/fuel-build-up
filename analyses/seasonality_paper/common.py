@@ -19,6 +19,7 @@ import cartopy.crs as ccrs
 import cloudpickle
 import dask.distributed
 import eli5
+import iris
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
@@ -87,6 +88,7 @@ from wildfires.utils import (
     Time,
     get_masked_array,
     get_unmasked,
+    replace_cube_coord,
     shorten_columns,
     shorten_features,
 )
@@ -121,6 +123,9 @@ data_memory = get_memory(PAPER_DIR.name, backend="cloudpickle", verbose=2)
 
 map_figure_saver_kwargs = {"dpi": 1200}
 
+figure_saver = FigureSaver(directories=Path("~") / "tmp" / PAPER_DIR.name, debug=True,)
+map_figure_saver = figure_saver(**map_figure_saver_kwargs)
+
 # 9 colors used to differentiate varying the lags throughout.
 lags = [0, 1, 3, 6, 9, 12, 18, 24]
 lag_colors = sns.color_palette("Set1", desat=0.85)
@@ -153,6 +158,14 @@ experiment_marker_dict.update(
     }
 )
 
+# SHAP parameters.
+shap_params = {
+    "job_samples": 2000,  # Samples per job.
+}
+shap_interact_params = {
+    "job_samples": 50,  # Samples per job.
+    "max_index": 5999,  # Maximum job array index (inclusive).
+}
 
 # Specify common RF (training) params.
 n_splits = 5
@@ -164,10 +177,10 @@ default_param_dict = {
 
 param_dict = {
     **default_param_dict,
-    "ccp_alpha": 0.0,
+    "ccp_alpha": 2e-9,
     "max_depth": 18,
     "max_features": "auto",
-    "min_samples_leaf": 2,
+    "min_samples_leaf": 3,
     "min_samples_split": 2,
     "n_estimators": 500,
 }
@@ -707,6 +720,14 @@ def add_common_path_deco(f):
     return path_f
 
 
+def add_common_path(client):
+    def _add_common():
+        if str(PAPER_DIR) not in sys.path:
+            sys.path.insert(0, str(PAPER_DIR))
+
+    client.run(_add_common)
+
+
 def get_lag(feature, target_feature=None):
     """Return the lag duration as an integer.
 
@@ -723,11 +744,11 @@ def get_lag(feature, target_feature=None):
 
     """
     if target_feature is None:
-        target_feature = ".*"
+        target_feature = ".*?"
     else:
         target_feature = re.escape(target_feature)
 
-    match = re.search(target_feature + r"\s-(\d+)\s", feature)
+    match = re.search(target_feature + r"(?:\s\d+NN){0,1}\s-(\d+)\s", feature)
     if match is not None:
         return int(match.groups(default="0")[0])
     if match is None and re.match(target_feature, feature):

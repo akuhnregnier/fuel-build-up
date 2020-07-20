@@ -39,6 +39,33 @@ save_pdp_plot_1d = partial(
 )
 multi_ale_plot_1d = partial(multi_ale_plot_1d, figure_saver=figure_saver)
 
+# Number of SHAP jobs.
+try:
+    X_train, X_test, y_train, y_test = data_split_cache.load()
+    # Maximum job array index (inclusive).
+    shap_params["max_index"] = math.floor(X_train.shape[0] / shap_params["job_samples"])
+    # Upper bound only.
+    shap_params["total_samples"] = (shap_params["max_index"] + 1) * shap_params[
+        "job_samples"
+    ]
+except NoCachedDataError:
+    warnings.warn(
+        "Processed data not found, not calculating 'max_index' or 'total_samples'."
+    )
+
+# Upper bound only.
+shap_interact_params["total_samples"] = (
+    shap_interact_params["max_index"] + 1
+) * shap_interact_params["job_samples"]
+
+# SHAP cache.
+shap_cache = SimpleCache("shap_cache", cache_dir=CACHE_DIR / Path("shap"))
+shap_interact_cache = SimpleCache(
+    "shap_interact_cache", cache_dir=CACHE_DIR / Path("shap_interaction")
+)
+
+interact_data_cache = SimpleCache("SHAP_interact_data", cache_dir=CACHE_DIR)
+
 
 def get_model(X_train=None, y_train=None):
     return common_get_model(cache_dir=CACHE_DIR, X_train=X_train, y_train=y_train)

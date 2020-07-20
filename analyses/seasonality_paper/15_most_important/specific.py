@@ -39,27 +39,55 @@ save_pdp_plot_1d = partial(
 )
 multi_ale_plot_1d = partial(multi_ale_plot_1d, figure_saver=figure_saver)
 
+# Number of SHAP jobs.
+try:
+    X_train, X_test, y_train, y_test = data_split_cache.load()
+    # Maximum job array index (inclusive).
+    shap_params["max_index"] = math.floor(X_train.shape[0] / shap_params["job_samples"])
+    # Upper bound only.
+    shap_params["total_samples"] = (shap_params["max_index"] + 1) * shap_params[
+        "job_samples"
+    ]
+except NoCachedDataError:
+    warnings.warn(
+        "Processed data not found, not calculating 'max_index' or 'total_samples'."
+    )
+
+# Upper bound only.
+shap_interact_params["total_samples"] = (
+    shap_interact_params["max_index"] + 1
+) * shap_interact_params["job_samples"]
+
+# SHAP cache.
+shap_cache = SimpleCache("shap_cache", cache_dir=CACHE_DIR / Path("shap"))
+shap_interact_cache = SimpleCache(
+    "shap_interact_cache", cache_dir=CACHE_DIR / Path("shap_interaction")
+)
+
+interact_data_cache = SimpleCache("SHAP_interact_data", cache_dir=CACHE_DIR)
+
+
 # Redefine the common functionality for our use-case - no shifted variables.
 _common_get_data = get_data
 _common_get_offset_data = get_offset_data
 
 
 selected_features = (
-    "Dry Day Period",
-    "Max Temp",
-    f"VOD Ku-band {n_months}NN -1 Month",
-    f"VOD Ku-band {n_months}NN -3 Month",
     f"FAPAR {n_months}NN",
-    "Dry Day Period -3 Month",
-    f"SIF {n_months}NN",
-    f"LAI {n_months}NN -3 Month",
-    f"VOD Ku-band {n_months}NN",
+    "Dry Day Period",
+    f"VOD Ku-band {n_months}NN -1 Month",
+    f"LAI {n_months}NN -1 Month",
+    "Max Temp",
     f"VOD Ku-band {n_months}NN -6 Month",
-    "pftHerb",
-    "popd",
-    "lightning",
-    f"SIF {n_months}NN -6 Month",
     "pftCrop",
+    f"FAPAR {n_months}NN -1 Month",
+    "popd",
+    f"VOD Ku-band {n_months}NN",
+    f"VOD Ku-band {n_months}NN -3 Month",
+    f"SIF {n_months}NN",
+    f"FAPAR {n_months}NN -3 Month",
+    f"LAI {n_months}NN -3 Month",
+    f"FAPAR {n_months}NN -6 Month",
 )
 
 
