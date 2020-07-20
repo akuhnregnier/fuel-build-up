@@ -56,6 +56,6 @@ if __name__ == "__main__":
         func,
         ncpus=1,
         mem="7gb",
-        walltime="04:00:00",
-        max_index=995,
+        walltime="05:00:00",
+        max_index=689,
     )
