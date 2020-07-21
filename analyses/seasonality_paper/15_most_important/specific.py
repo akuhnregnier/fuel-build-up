@@ -71,7 +71,6 @@ interact_data_cache = SimpleCache("SHAP_interact_data", cache_dir=CACHE_DIR)
 _common_get_data = get_data
 _common_get_offset_data = get_offset_data
 
-
 selected_features = (
     f"FAPAR {n_months}NN",
     "Dry Day Period",
@@ -82,11 +81,11 @@ selected_features = (
     f"FAPAR {n_months}NN -1 Month",
     f"LAI {n_months}NN -3 Month",
     f"VOD Ku-band {n_months}NN -6 Month",
-    f"VOD Ku-band {n_months}NN -3 Month",
+    f"SIF {n_months}NN -9 Month",
     "popd",
     f"SIF {n_months}NN",
+    f"VOD Ku-band {n_months}NN -3 Month",
     f"VOD Ku-band {n_months}NN",
-    f"SIF {n_months}NN -9 Month",
     f"FAPAR {n_months}NN -3 Month",
 )
 
