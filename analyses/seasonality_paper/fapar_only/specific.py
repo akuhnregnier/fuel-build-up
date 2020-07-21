@@ -82,11 +82,11 @@ selected_features = (
     "Dry Day Period -1 Month",
     "SWI(1) 3NN",
     "Dry Day Period -9 Month",
-    f"VOD Ku-band {n_months}NN",
-    f"VOD Ku-band {n_months}NN -1 Month",
-    f"VOD Ku-band {n_months}NN -3 Month",
-    f"VOD Ku-band {n_months}NN -6 Month",
-    f"VOD Ku-band {n_months}NN -9 Month",
+    f"FAPAR {n_months}NN",
+    f"FAPAR {n_months}NN -1 Month",
+    f"FAPAR {n_months}NN -3 Month",
+    f"FAPAR {n_months}NN -6 Month",
+    f"FAPAR {n_months}NN -9 Month",
 )
 
 offset_selected_features = []
