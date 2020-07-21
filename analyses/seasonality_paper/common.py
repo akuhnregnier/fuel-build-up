@@ -123,7 +123,7 @@ data_memory = get_memory(PAPER_DIR.name, backend="cloudpickle", verbose=2)
 
 map_figure_saver_kwargs = {"dpi": 1200}
 
-figure_saver = FigureSaver(directories=Path("~") / "tmp" / PAPER_DIR.name, debug=True,)
+figure_saver = FigureSaver(directories=Path("~") / "tmp" / PAPER_DIR.name, debug=True)
 map_figure_saver = figure_saver(**map_figure_saver_kwargs)
 
 # 9 colors used to differentiate varying the lags throughout.
@@ -159,9 +159,7 @@ experiment_marker_dict.update(
 )
 
 # SHAP parameters.
-shap_params = {
-    "job_samples": 2000,  # Samples per job.
-}
+shap_params = {"job_samples": 2000}  # Samples per job.
 shap_interact_params = {
     "job_samples": 50,  # Samples per job.
     "max_index": 5999,  # Maximum job array index (inclusive).
@@ -170,10 +168,7 @@ shap_interact_params = {
 # Specify common RF (training) params.
 n_splits = 5
 
-default_param_dict = {
-    "random_state": 1,
-    "bootstrap": True,
-}
+default_param_dict = {"random_state": 1, "bootstrap": True}
 
 param_dict = {
     **default_param_dict,
@@ -206,6 +201,33 @@ def common_get_model(cache_dir, X_train=None, y_train=None):
 
 # Data params.
 n_months = 3
+
+feature_categories = {
+    "meteorology": [
+        "Dry Day Period",
+        f"SWI(1) {n_months}NN",
+        "Max Temp",
+        "Diurnal Temp Range",
+        "lightning",
+    ],
+    "human": ["pftCrop", "popd",],
+    "landcover": ["pftHerb", "ShrubAll", "TreeAll", "AGB Tree",],
+    "vegetation": [
+        f"VOD Ku-band {n_months}NN",
+        f"FAPAR {n_months}NN",
+        f"LAI {n_months}NN",
+        f"SIF {n_months}NN",
+    ],
+}
+
+feature_order = {}
+no_nn_feature_order = {}
+counter = 0
+for category, entries in feature_categories.items():
+    for entry in entries:
+        feature_order[entry] = counter
+        no_nn_feature_order[entry.strip(f" {n_months}NN")] = counter
+        counter += 1
 
 
 # Creating the Data Structures used for Fitting
@@ -774,3 +796,35 @@ def filter_by_month(features, target_feature, max_month):
         if lag is not None and lag <= max_month:
             filtered.append(feature)
     return filtered
+
+
+def sort_features(features):
+    """Sort feature names using their names and shift magnitudes.
+
+    Args:
+        features (iterable of str): Feature names to sort.
+
+    Returns:
+        list of str: Sorted list of features.
+
+    """
+    raw_features = []
+    lags = []
+    for feature in features:
+        lag = get_lag(feature)
+        assert lag is not None
+        nn_match = re.search("\d+NN", feature)
+        if nn_match:
+            raw_features.append(feature[: nn_match.span()[0]].strip())
+        elif str(lag) in feature:
+            raw_features.append(feature[: feature.index(str(lag))].strip("-").strip())
+        else:
+            raw_features.append(feature)
+        lags.append(lag)
+    sort_tuples = tuple(zip(features, raw_features, lags))
+    return [
+        s[0]
+        for s in sorted(
+            sort_tuples, key=lambda x: (no_nn_feature_order[x[1]], abs(int(x[2]))),
+        )
+    ]
