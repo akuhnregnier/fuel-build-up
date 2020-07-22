@@ -10,7 +10,7 @@ import warnings
 from collections import defaultdict
 from datetime import datetime
 from functools import partial, reduce, wraps
-from itertools import combinations
+from itertools import combinations, product
 from operator import mul
 from pathlib import Path
 from time import time
@@ -55,6 +55,7 @@ from wildfires.dask_cx1 import (
     CachedResults,
     DaskRandomForestRegressor,
     common_worker_threads,
+    dask_fit_combinations,
     dask_fit_loco,
     fit_dask_sub_est_grid_search_cv,
     fit_dask_sub_est_random_search_cv,
