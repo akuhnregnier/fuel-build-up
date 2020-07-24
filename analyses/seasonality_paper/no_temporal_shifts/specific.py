@@ -68,8 +68,78 @@ interact_data_cache = SimpleCache("SHAP_interact_data", cache_dir=CACHE_DIR)
 
 
 # Redefine the common functionality for our use-case - no shifted variables.
-get_data = partial(get_data, shift_months=None)
-get_offset_data = partial(get_offset_data, shift_months=None)
+_common_get_data = get_data
+_common_get_offset_data = get_offset_data
+
+selected_features = (
+    "Dry Day Period",
+    "SWI(1) 3NN",
+    "Max Temp",
+    "Diurnal Temp Range",
+    "lightning",
+    "pftCrop",
+    "popd",
+    "pftHerb",
+    "ShrubAll",
+    "TreeAll",
+    "AGB Tree",
+    "VOD Ku-band 3NN",
+    "FAPAR 3NN",
+    "LAI 3NN",
+    "SIF 3NN",
+)
+
+
+@wraps(_common_get_data)
+def get_data(*args, **kwargs):
+    (
+        endog_data,
+        exog_data,
+        master_mask,
+        filled_datasets,
+        masked_datasets,
+        land_mask,
+    ) = _common_get_data(*args, **kwargs)
+
+    # We need to subset exog_data, filled_datasets, and masked_datasets.
+    exog_data = exog_data[list(selected_features)]
+    filled_datasets = filled_datasets.select_variables(selected_features)
+    masked_datasets = masked_datasets.select_variables(selected_features)
+
+    return (
+        endog_data,
+        exog_data,
+        master_mask,
+        filled_datasets,
+        masked_datasets,
+        land_mask,
+    )
+
+
+@wraps(_common_get_offset_data)
+def get_offset_data(*args, **kwargs):
+    (
+        endog_data,
+        exog_data,
+        master_mask,
+        filled_datasets,
+        masked_datasets,
+        land_mask,
+    ) = _common_get_offset_data(*args, **kwargs)
+
+    # We need to subset exog_data, filled_datasets, and masked_datasets.
+    exog_data = exog_data[list(selected_features)]
+    filled_datasets = filled_datasets.select_variables(selected_features)
+    masked_datasets = masked_datasets.select_variables(selected_features)
+
+    return (
+        endog_data,
+        exog_data,
+        master_mask,
+        filled_datasets,
+        masked_datasets,
+        land_mask,
+    )
 
 
 def get_model(X_train=None, y_train=None):
