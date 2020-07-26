@@ -829,3 +829,31 @@ def sort_features(features):
             sort_tuples, key=lambda x: (no_nn_feature_order[x[1]], abs(int(x[2]))),
         )
     ]
+
+
+def transform_series_sum_norm(x):
+    x = x / np.sum(np.abs(x))
+    return x
+
+
+def plot_and_list_importances(importances, methods, print_n=15, N=15, verbose=True):
+    fig, ax = plt.subplots()
+
+    combined = None
+    for method in methods:
+        transformed = transform_series_sum_norm(importances[method])
+
+        ax.plot(transformed.values, linestyle="", marker="o", label=method)
+
+        if combined is None:
+            combined = transformed
+        else:
+            combined += transformed
+
+    ax.legend(loc="best")
+    ax.grid(alpha=0.4)
+
+    combined.sort_values(ascending=False, inplace=True)
+    if verbose:
+        print(combined[:print_n].to_latex())
+    return combined[:N]
