@@ -139,7 +139,7 @@ experiment_color_dict = {
 }
 experiment_name_dict = {
     experiment: name
-    for experiment, name in zip(experiments, ["all features", "top 15", "no lags"])
+    for experiment, name in zip(experiments, ["all", "top 15", "no lags"])
 }
 experiment_color_dict.update(
     {
