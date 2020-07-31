@@ -864,3 +864,96 @@ def plot_and_list_importances(importances, methods, print_n=15, N=15, verbose=Tr
     if verbose:
         print(combined[:print_n].to_latex())
     return combined[:N]
+
+
+def calculate_2d_masked_shap_values(
+    X_train, master_mask, valid_train_indices, shap_values
+):
+    masked_shap_arrs = []
+    masked_shap_arrs_std = []
+    vmins = []
+    vmaxs = []
+    std_vmins = []
+    std_vmaxs = []
+
+    for i, feature in enumerate(tqdm(X_train.columns, desc="Aggregating SHAP values")):
+        masked_shap_comp = np.ma.MaskedArray(
+            np.zeros_like(master_mask, dtype=np.float64), mask=np.ones_like(master_mask)
+        )
+        masked_shap_comp.ravel()[
+            valid_train_indices[: shap_values.shape[0]]
+        ] = shap_values[:, i]
+        avg_shap_comp = np.ma.mean(masked_shap_comp, axis=0)
+        masked_shap_arrs.append(avg_shap_comp)
+        vmins.append(np.min(avg_shap_comp))
+        vmaxs.append(np.max(avg_shap_comp))
+
+        avg_shap_std = np.ma.std(masked_shap_comp, axis=0)
+        masked_shap_arrs_std.append(avg_shap_std)
+        std_vmins.append(np.min(avg_shap_std))
+        std_vmaxs.append(np.max(avg_shap_std))
+
+    vmin = min(vmins)
+    vmax = max(vmaxs)
+
+    std_vmin = min(std_vmins)
+    std_vmax = max(std_vmaxs)
+
+    return masked_shap_arrs, masked_shap_arrs_std, vmin, vmax, std_vmin, std_vmax
+
+
+def plot_shap_value_maps(
+    X_train,
+    masked_shap_arrs,
+    masked_shap_arrs_std,
+    vmin,
+    vmax,
+    std_vmin,
+    std_vmax,
+    map_figure_saver,
+):
+    for i, feature in enumerate(tqdm(X_train.columns, desc="Mapping SHAP values")):
+        fig = cube_plotting(
+            masked_shap_arrs[i],
+            fig=plt.figure(figsize=(5.1, 2.8)),
+            title=f"Mean SHAP value for '{shorten_features(feature)}'",
+            cmap="Spectral_r",
+            nbins=7,
+            cmap_midpoint=0,
+            cmap_symmetric=True,
+            vmin=vmin,
+            vmax=vmax,
+            log=True,
+            log_auto_bins=False,
+            min_edge=1e-3,
+            extend="neither",
+            colorbar_kwargs={
+                "format": "%0.1e",
+                "label": f"SHAP ('{shorten_features(feature)}')",
+            },
+            coastline_kwargs={"linewidth": 0.3},
+        )
+        map_figure_saver.save_figure(
+            fig, f"shap_value_map_{feature}", sub_directory="shap_map"
+        )
+        fig = cube_plotting(
+            masked_shap_arrs_std[i],
+            fig=plt.figure(figsize=(5.1, 2.8)),
+            title=f"STD SHAP value for '{shorten_features(feature)}'",
+            cmap="YlOrRd",
+            nbins=7,
+            vmin=std_vmin,
+            vmax=std_vmax,
+            log=True,
+            log_auto_bins=False,
+            min_edge=1e-3,
+            extend="neither",
+            colorbar_kwargs={
+                "format": "%0.1e",
+                "label": f"SHAP ('{shorten_features(feature)}')",
+            },
+            coastline_kwargs={"linewidth": 0.3},
+        )
+        map_figure_saver.save_figure(
+            fig, f"shap_value_std_map_{feature}", sub_directory="shap_map_std"
+        )
