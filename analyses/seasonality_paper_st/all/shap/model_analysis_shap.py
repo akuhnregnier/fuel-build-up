@@ -57,5 +57,5 @@ if __name__ == "__main__":
         ncpus=1,
         mem="7gb",
         walltime="06:00:00",
-        max_index=655,
+        max_index=609,
     )

@@ -87,6 +87,7 @@ from wildfires.utils import (
     NoCachedDataError,
     SimpleCache,
     Time,
+    ensure_datetime,
     get_masked_array,
     get_unmasked,
     replace_cube_coord,
@@ -221,14 +222,15 @@ feature_categories = {
     ],
 }
 
-feature_order = {}
 no_nn_feature_order = {}
 counter = 0
 for category, entries in feature_categories.items():
     for entry in entries:
-        feature_order[entry] = counter
         no_nn_feature_order[entry.strip(f" {n_months}NN")] = counter
         counter += 1
+
+# If BA is included, position it first.
+no_nn_feature_order["GFED4 BA"] = -1
 
 
 # Creating the Data Structures used for Fitting

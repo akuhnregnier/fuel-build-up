@@ -73,20 +73,20 @@ _common_get_offset_data = get_offset_data
 
 selected_features = (
     "Dry Day Period",
+    "Dry Day Period -1 Month",
+    "Dry Day Period -3 Month",
+    "Dry Day Period -6 Month",
+    "Dry Day Period -9 Month",
     "Max Temp",
     "pftCrop",
     "popd",
-    "Diurnal Temp Range",
-    "Dry Day Period -3 Month",
+    "pftHerb",
     "AGB Tree",
-    "Dry Day Period -1 Month",
-    "SWI(1) 3NN",
-    "Dry Day Period -9 Month",
-    f"FAPAR {n_months}NN",
-    f"FAPAR {n_months}NN -1 Month",
-    f"FAPAR {n_months}NN -3 Month",
-    f"FAPAR {n_months}NN -6 Month",
-    f"FAPAR {n_months}NN -9 Month",
+    "FAPAR 50P 4k",
+    "FAPAR 50P 4k -1 Month",
+    "FAPAR 50P 4k -3 Month",
+    "FAPAR 50P 4k -6 Month",
+    "FAPAR 50P 4k -9 Month",
 )
 
 offset_selected_features = []
@@ -167,3 +167,11 @@ def get_offset_data(*args, **kwargs):
 
 def get_model(X_train=None, y_train=None):
     return common_get_model(cache_dir=CACHE_DIR, X_train=X_train, y_train=y_train)
+
+
+model_score_cache = SimpleCache("model_scores", cache_dir=CACHE_DIR)
+
+
+@model_score_cache
+def get_model_scores(rf=None, X_test=None, X_train=None, y_test=None, y_train=None):
+    return common_get_model_scores(rf, X_test, X_train, y_test, y_train)

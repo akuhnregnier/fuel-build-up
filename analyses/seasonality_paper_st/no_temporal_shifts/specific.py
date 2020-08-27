@@ -71,22 +71,26 @@ interact_data_cache = SimpleCache("SHAP_interact_data", cache_dir=CACHE_DIR)
 _common_get_data = get_data
 _common_get_offset_data = get_offset_data
 
-selected_features = (
-    "Dry Day Period",
-    "SWI(1) 3NN",
-    "Max Temp",
-    "Diurnal Temp Range",
-    "lightning",
-    "pftCrop",
-    "popd",
-    "pftHerb",
-    "ShrubAll",
-    "TreeAll",
-    "AGB Tree",
-    "VOD Ku-band 3NN",
-    "FAPAR 3NN",
-    "LAI 3NN",
-    "SIF 3NN",
+selected_features = tuple(
+    get_filled_names(
+        (
+            "Dry Day Period",
+            "SWI(1)",
+            "Max Temp",
+            "Diurnal Temp Range",
+            "lightning",
+            "pftCrop",
+            "popd",
+            "pftHerb",
+            "ShrubAll",
+            "TreeAll",
+            "AGB Tree",
+            "VOD Ku-band",
+            "FAPAR",
+            "LAI",
+            "SIF",
+        )
+    )
 )
 
 
@@ -144,3 +148,11 @@ def get_offset_data(*args, **kwargs):
 
 def get_model(X_train=None, y_train=None):
     return common_get_model(cache_dir=CACHE_DIR, X_train=X_train, y_train=y_train)
+
+
+model_score_cache = SimpleCache("model_scores", cache_dir=CACHE_DIR)
+
+
+@model_score_cache
+def get_model_scores(rf=None, X_test=None, X_train=None, y_test=None, y_train=None):
+    return common_get_model_scores(rf, X_test, X_train, y_test, y_train)

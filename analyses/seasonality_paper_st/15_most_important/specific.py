@@ -72,21 +72,21 @@ _common_get_data = get_data
 _common_get_offset_data = get_offset_data
 
 selected_features = (
-    f"FAPAR {n_months}NN",
     "Dry Day Period",
-    f"VOD Ku-band {n_months}NN -1 Month",
+    "FAPAR 50P 4k",
     "Max Temp",
-    f"LAI {n_months}NN -1 Month",
+    "VOD Ku-band 50P 4k -3 Month",
+    "LAI 50P 4k -1 Month",
+    "Dry Day Period -1 Month",
+    "Dry Day Period -3 Month",
+    "SIF 50P 4k",
+    "LAI 50P 4k -3 Month",
+    "VOD Ku-band 50P 4k -1 Month",
+    "VOD Ku-band 50P 4k",
+    "FAPAR 50P 4k -1 Month",
     "pftCrop",
-    f"FAPAR {n_months}NN -1 Month",
-    f"LAI {n_months}NN -3 Month",
-    f"VOD Ku-band {n_months}NN -6 Month",
-    f"SIF {n_months}NN -9 Month",
+    "SIF 50P 4k -9 Month",
     "popd",
-    f"SIF {n_months}NN",
-    f"VOD Ku-band {n_months}NN -3 Month",
-    f"VOD Ku-band {n_months}NN",
-    f"FAPAR {n_months}NN -3 Month",
 )
 
 
@@ -144,3 +144,11 @@ def get_offset_data(*args, **kwargs):
 
 def get_model(X_train=None, y_train=None):
     return common_get_model(cache_dir=CACHE_DIR, X_train=X_train, y_train=y_train)
+
+
+model_score_cache = SimpleCache("model_scores", cache_dir=CACHE_DIR)
+
+
+@model_score_cache
+def get_model_scores(rf=None, X_test=None, X_train=None, y_test=None, y_train=None):
+    return common_get_model_scores(rf, X_test, X_train, y_test, y_train)

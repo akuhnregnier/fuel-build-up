@@ -69,3 +69,11 @@ interact_data_cache = SimpleCache("SHAP_interact_data", cache_dir=CACHE_DIR)
 
 def get_model(X_train=None, y_train=None):
     return common_get_model(cache_dir=CACHE_DIR, X_train=X_train, y_train=y_train)
+
+
+model_score_cache = SimpleCache("model_scores", cache_dir=CACHE_DIR)
+
+
+@model_score_cache
+def get_model_scores(rf=None, X_test=None, X_train=None, y_test=None, y_train=None):
+    return common_get_model_scores(rf, X_test, X_train, y_test, y_train)

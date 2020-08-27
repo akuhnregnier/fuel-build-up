@@ -34,12 +34,12 @@ from joblib import Parallel, delayed, parallel_backend
 from loguru import logger as loguru_logger
 from matplotlib.colors import SymLogNorm, from_levels_and_colors
 from matplotlib.patches import Rectangle
-from pdpbox import pdp
 from sklearn.base import clone
 from sklearn.metrics import mean_squared_error, r2_score
 from sklearn.model_selection import train_test_split
 
 from alepython.ale import _sci_format, ale_plot, first_order_ale_quant
+from pdpbox import pdp
 from wildfires.analysis import (
     FigureSaver,
     MidpointNormalize,
@@ -88,6 +88,7 @@ from wildfires.utils import (
     NoCachedDataError,
     SimpleCache,
     Time,
+    ensure_datetime,
     get_masked_array,
     get_unmasked,
     replace_cube_coord,
@@ -201,6 +202,19 @@ def common_get_model(cache_dir, X_train=None, y_train=None):
     return model
 
 
+def common_get_model_scores(rf, X_test, X_train, y_test, y_train):
+    rf.n_jobs = get_ncpus()
+    with parallel_backend("threading", n_jobs=get_ncpus()):
+        y_pred = rf.predict(X_test)
+        y_train_pred = rf.predict(X_train)
+    return {
+        "test_r2": r2_score(y_test, y_pred),
+        "test_mse": mean_squared_error(y_test, y_pred),
+        "train_r2": r2_score(y_train, y_train_pred),
+        "train_mse": mean_squared_error(y_train, y_train_pred),
+    }
+
+
 # Data filling params.
 st_persistent_perc = 50
 st_k = 4
@@ -213,32 +227,49 @@ def fill_name(name):
     return f"{name} {st_persistent_perc}P {st_k}k"
 
 
-def get_filled_name(name):
-    if any(var in name for var in filled_variables):
-        return f"{name} {st_persistent_perc}P {st_k}k"
+def get_filled_names(names):
+    if isinstance(names, str):
+        return get_filled_names((names,))
+    filled = []
+    for name in names:
+        if any(var in name for var in filled_variables):
+            filled.append(fill_name(name))
+        else:
+            filled.append(name)
+    return filled
+
+
+def repl_fill_name(name, sub=""):
+    fill_ins = fill_name("")
+    return name.replace(fill_ins, sub)
+
+
+def repl_fill_names(names, sub=""):
+    if isinstance(names, str):
+        return repl_fill_names((names,), sub=sub)
+    return [repl_fill_name(name, sub=sub) for name in names]
 
 
 feature_categories = {
-    "meteorology": list(
-        map(
-            get_filled_name,
-            ["Dry Day Period", "SWI(1)", "Max Temp", "Diurnal Temp Range", "lightning"],
-        )
+    "meteorology": get_filled_names(
+        ["Dry Day Period", "SWI(1)", "Max Temp", "Diurnal Temp Range", "lightning"]
     ),
     "human": ["pftCrop", "popd"],
     "landcover": ["pftHerb", "ShrubAll", "TreeAll", "AGB Tree"],
-    "vegetation": list(map(get_filled_name, ["VOD Ku-band", "FAPAR", "LAI", "SIF"])),
+    "vegetation": get_filled_names(["VOD Ku-band", "FAPAR", "LAI", "SIF"]),
 }
 
 feature_order = {}
-no_nn_feature_order = {}
+no_fill_feature_order = {}
 counter = 0
 for category, entries in feature_categories.items():
     for entry in entries:
         feature_order[entry] = counter
-        no_nn_feature_order[entry.strip(fill_name(""))] = counter
+        no_fill_feature_order[entry.strip(fill_name(""))] = counter
         counter += 1
 
+# If BA is included, position it first.
+no_fill_feature_order["GFED4 BA"] = -1
 
 # Creating the Data Structures used for Fitting
 @data_memory.cache
@@ -265,89 +296,86 @@ def get_data(
         WWLLN(),
     ]
 
-    # Datasets subject to temporal interpolation.
+    # Datasets subject to temporal interpolation (filling).
     temporal_interp_datasets = [
         Datasets(Copernicus_SWI()).select_variables(("SWI(1)",)).dataset
     ]
 
-    # Datasets subject to interpolation and shifting.
+    # Datasets subject to temporal interpolation and shifting.
     shift_and_interp_datasets = [
         Datasets(MOD15A2H_LAI_fPAR()).select_variables(("FAPAR", "LAI")).dataset,
         Datasets(VODCA()).select_variables(("VOD Ku-band",)).dataset,
         Datasets(GlobFluo_SIF()).select_variables(("SIF",)).dataset,
     ]
 
-    # These datasets may be shifted.
+    # Datasets subject to temporal shifting.
     datasets_to_shift = [
         Datasets(ERA5_DryDayPeriod()).select_variables(("Dry Day Period",)).dataset
     ]
 
-    # Determine shared temporal extent of the data.
-    min_time, max_time = dataset_times(
+    all_datasets = (
         selection_datasets
         + temporal_interp_datasets
         + shift_and_interp_datasets
         + datasets_to_shift
-    )[:2]
+    )
+
+    # Determine shared temporal extent of the data.
+    min_time, max_time = dataset_times(all_datasets)[:2]
+    shift_min_time = min_time - relativedelta(years=2)
 
     # Sanity check.
     assert min_time == datetime(2010, 1, 1)
+    assert shift_min_time == datetime(2008, 1, 1)
     assert max_time == datetime(2015, 4, 1)
 
-    # Apply time limitations to all datasets.
-    for datasets in (
-        selection_datasets,
-        temporal_interp_datasets,
-        shift_and_interp_datasets,
-        datasets_to_shift,
-    ):
-        for dataset in datasets:
-            dataset.limit_months(min_time, max_time)
+    for dataset in datasets_to_shift + shift_and_interp_datasets:
+        # Apply longer time limit to the datasets to be shifted.
+        dataset.limit_months(shift_min_time, max_time)
+
+        for cube in dataset:
+            assert cube.shape[0] == 88
+
+    for dataset in selection_datasets + temporal_interp_datasets:
+        # Apply time limit.
+        dataset.limit_months(min_time, max_time)
+
+        if dataset.frequency == "monthly":
+            for cube in dataset:
+                assert cube.shape[0] == 64
+
+    for dataset in all_datasets:
+        # Regrid each dataset to the common grid.
+        dataset.regrid()
 
     # Calculate and apply the shared mask.
     total_masks = []
 
-    for datasets in (temporal_interp_datasets, shift_and_interp_datasets):
-        for dataset in datasets:
-            # Regrid each dataset to the common grid.
-            dataset.regrid()
+    for dataset in temporal_interp_datasets + shift_and_interp_datasets:
+        for cube in dataset.cubes:
+            # Ignore areas that are always masked, e.g. water.
+            ignore_mask = np.all(cube.data.mask, axis=0)
 
-            for cube in dataset.cubes:
-                if not cube.coords("month_number"):
-                    iris.coord_categorisation.add_month_number(cube, "time")
+            # Also ignore those areas with low data availability.
+            ignore_mask |= np.sum(cube.data.mask, axis=0) > (
+                7 * 6  # Up to 6 months for each of the 7 complete years.
+                + 10  # Additional Jan, Feb, Mar, Apr, + 6 extra.
+            )
 
-                # Ignore areas that are always masked, e.g. water.
-                ignore_mask = np.all(cube.data.mask, axis=0)
-
-                # Also ignore those areas with low data availability.
-                ignore_mask |= np.sum(cube.data.mask, axis=0) > (
-                    5 * 6  # Up to 6 months for each of the 5 complete years.
-                    + 8  # Additional Jan, Feb, Mar, Apr, + 4 extra.
-                )
-
-                total_masks.append(ignore_mask)
+            total_masks.append(ignore_mask)
 
     combined_mask = reduce(np.logical_or, total_masks)
 
     # Apply mask to all datasets.
-    for datasets in (
-        selection_datasets,
-        temporal_interp_datasets,
-        shift_and_interp_datasets,
-        datasets_to_shift,
-    ):
-        for dataset in datasets:
-            dataset.apply_masks(combined_mask)
+    for dataset in all_datasets:
+        dataset.apply_masks(combined_mask)
 
     # Carry out the minima and season-trend filling.
-    for i, dataset in enumerate(temporal_interp_datasets):
-        temporal_interp_datasets[i] = dataset.get_persistent_season_trend_dataset(
-            persistent_perc=st_persistent_perc, k=st_k
-        )
-    for i, dataset in enumerate(shift_and_interp_datasets):
-        shift_and_interp_datasets[i] = dataset.get_persistent_season_trend_dataset(
-            persistent_perc=st_persistent_perc, k=st_k
-        )
+    for datasets in (temporal_interp_datasets, shift_and_interp_datasets):
+        for i, dataset in enumerate(datasets):
+            datasets[i] = dataset.get_persistent_season_trend_dataset(
+                persistent_perc=st_persistent_perc, k=st_k
+            )
 
     datasets_to_shift.extend(shift_and_interp_datasets)
     selection_datasets += datasets_to_shift
@@ -363,36 +391,32 @@ def get_data(
                 )
 
     if selection_variables is None:
-        selection_variables = list(
-            map(
-                get_filled_name,
-                [
-                    "AGB Tree",
-                    "Diurnal Temp Range",
-                    "Dry Day Period",
-                    "FAPAR",
-                    "LAI",
-                    "Max Temp",
-                    "SIF",
-                    "SWI(1)",
-                    "ShrubAll",
-                    "TreeAll",
-                    "VOD Ku-band",
-                    "lightning",
-                    "pftCrop",
-                    "pftHerb",
-                    "popd",
-                ],
-            )
+        selection_variables = get_filled_names(
+            [
+                "AGB Tree",
+                "Diurnal Temp Range",
+                "Dry Day Period",
+                "FAPAR",
+                "LAI",
+                "Max Temp",
+                "SIF",
+                "SWI(1)",
+                "ShrubAll",
+                "TreeAll",
+                "VOD Ku-band",
+                "lightning",
+                "pftCrop",
+                "pftHerb",
+                "popd",
+            ]
         )
         if shift_months is not None:
             for shift in shift_months:
                 selection_variables.extend(
                     [
                         f"{var} {-shift} Month"
-                        for var in map(
-                            get_filled_name,
-                            ["LAI", "FAPAR", "Dry Day Period", "VOD Ku-band", "SIF"],
+                        for var in get_filled_names(
+                            ["LAI", "FAPAR", "Dry Day Period", "VOD Ku-band", "SIF"]
                         )
                     ]
                 )
@@ -830,7 +854,10 @@ def get_lag(feature, target_feature=None):
     else:
         target_feature = re.escape(target_feature)
 
-    match = re.search(target_feature + r"(?:\s\d+NN){0,1}\s-(\d+)\s", feature)
+    # Avoid dealing with the fill naming.
+    feature = feature.replace(fill_name(""), "")
+
+    match = re.search(target_feature + r"\s-(\d+)\s", feature)
     if match is not None:
         return int(match.groups(default="0")[0])
     if match is None and re.match(target_feature, feature):
@@ -873,10 +900,10 @@ def sort_features(features):
     for feature in features:
         lag = get_lag(feature)
         assert lag is not None
-        nn_match = re.search("\d+NN", feature)
-        if nn_match:
-            raw_features.append(feature[: nn_match.span()[0]].strip())
-        elif str(lag) in feature:
+        # Remove fill naming addition.
+        feature = feature.replace(fill_name(""), "")
+        if str(lag) in feature:
+            # Strip lag information from the string.
             raw_features.append(feature[: feature.index(str(lag))].strip("-").strip())
         else:
             raw_features.append(feature)
@@ -885,7 +912,7 @@ def sort_features(features):
     return [
         s[0]
         for s in sorted(
-            sort_tuples, key=lambda x: (no_nn_feature_order[x[1]], abs(int(x[2])))
+            sort_tuples, key=lambda x: (no_fill_feature_order[x[1]], abs(int(x[2])))
         )
     ]
 

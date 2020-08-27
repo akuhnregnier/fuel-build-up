@@ -75,19 +75,20 @@ selected_features = (
     "Dry Day Period",
     "Max Temp",
     "TreeAll",
-    "SWI(1) 3NN",
+    "SWI(1) 50P 4k",
     "pftHerb",
-    "AGB Tree",
     "Diurnal Temp Range",
     "ShrubAll",
+    "AGB Tree",
     "pftCrop",
     "lightning",
-    f"VOD Ku-band {n_months}NN",
-    f"VOD Ku-band {n_months}NN -1 Month",
-    f"VOD Ku-band {n_months}NN -3 Month",
-    f"VOD Ku-band {n_months}NN -6 Month",
-    f"VOD Ku-band {n_months}NN -9 Month",
+    "VOD Ku-band 50P 4k",
+    "VOD Ku-band 50P 4k -1 Month",
+    "VOD Ku-band 50P 4k -3 Month",
+    "VOD Ku-band 50P 4k -6 Month",
+    "VOD Ku-band 50P 4k -9 Month",
 )
+assert len(selected_features) == 15
 
 offset_selected_features = []
 for column in selected_features:
@@ -167,3 +168,11 @@ def get_offset_data(*args, **kwargs):
 
 def get_model(X_train=None, y_train=None):
     return common_get_model(cache_dir=CACHE_DIR, X_train=X_train, y_train=y_train)
+
+
+model_score_cache = SimpleCache("model_scores", cache_dir=CACHE_DIR)
+
+
+@model_score_cache
+def get_model_scores(rf=None, X_test=None, X_train=None, y_test=None, y_train=None):
+    return common_get_model_scores(rf, X_test, X_train, y_test, y_train)
