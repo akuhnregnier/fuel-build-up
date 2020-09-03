@@ -74,19 +74,19 @@ _common_get_offset_data = get_offset_data
 selected_features = (
     "Dry Day Period",
     "Max Temp",
+    "SWI(1) 3NN",
     "TreeAll",
-    "SWI(1) 50P 4k",
     "pftHerb",
-    "Diurnal Temp Range",
-    "ShrubAll",
     "AGB Tree",
-    "pftCrop",
+    "Diurnal Temp Range",
     "lightning",
-    "FAPAR 50P 4k",
-    "FAPAR 50P 4k -1 Month",
-    "FAPAR 50P 4k -3 Month",
-    "FAPAR 50P 4k -6 Month",
-    "FAPAR 50P 4k -9 Month",
+    "ShrubAll",
+    "pftCrop",
+    "FAPAR 3NN",
+    "FAPAR 3NN -1 Month",
+    "FAPAR 3NN -3 Month",
+    "FAPAR 3NN -6 Month",
+    "FAPAR 3NN -9 Month",
 )
 assert len(selected_features) == 15
 

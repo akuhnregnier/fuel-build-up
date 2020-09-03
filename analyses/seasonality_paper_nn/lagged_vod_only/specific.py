@@ -74,19 +74,19 @@ _common_get_offset_data = get_offset_data
 selected_features = (
     "Dry Day Period",
     "Max Temp",
+    "SWI(1) 3NN",
     "TreeAll",
-    "SWI(1) 50P 4k",
     "pftHerb",
-    "Diurnal Temp Range",
-    "ShrubAll",
     "AGB Tree",
-    "pftCrop",
+    "Diurnal Temp Range",
     "lightning",
-    "VOD Ku-band 50P 4k",
-    "VOD Ku-band 50P 4k -1 Month",
-    "VOD Ku-band 50P 4k -3 Month",
-    "VOD Ku-band 50P 4k -6 Month",
-    "VOD Ku-band 50P 4k -9 Month",
+    "ShrubAll",
+    "pftCrop",
+    "VOD Ku-band 3NN",
+    "VOD Ku-band 3NN -1 Month",
+    "VOD Ku-band 3NN -3 Month",
+    "VOD Ku-band 3NN -6 Month",
+    "VOD Ku-band 3NN -9 Month",
 )
 assert len(selected_features) == 15
 

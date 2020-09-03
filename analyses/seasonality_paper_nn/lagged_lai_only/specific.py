@@ -70,23 +70,22 @@ interact_data_cache = SimpleCache("SHAP_interact_data", cache_dir=CACHE_DIR)
 # Redefine the common functionality for our use-case - no shifted variables.
 _common_get_data = get_data
 _common_get_offset_data = get_offset_data
-
 selected_features = (
     "Dry Day Period",
     "Max Temp",
+    "SWI(1) 3NN",
     "TreeAll",
-    "SWI(1) 50P 4k",
     "pftHerb",
-    "Diurnal Temp Range",
-    "ShrubAll",
     "AGB Tree",
-    "pftCrop",
+    "Diurnal Temp Range",
     "lightning",
-    f"LAI 50P 4k",
-    f"LAI 50P 4k -1 Month",
-    f"LAI 50P 4k -3 Month",
-    f"LAI 50P 4k -6 Month",
-    f"LAI 50P 4k -9 Month",
+    "ShrubAll",
+    "pftCrop",
+    f"LAI 3NN",
+    f"LAI 3NN -1 Month",
+    f"LAI 3NN -3 Month",
+    f"LAI 3NN -6 Month",
+    f"LAI 3NN -9 Month",
 )
 assert len(selected_features) == 15
 

@@ -101,10 +101,6 @@ if "TQDMAUTO" in os.environ:
 else:
     from tqdm import tqdm
 
-
-# XXX: Ideally, this should be temporary.
-os.environ["NCPUS"] = "32"
-
 loguru_logger.enable("alepython")
 loguru_logger.remove()
 loguru_logger.add(sys.stderr, level="WARNING")
