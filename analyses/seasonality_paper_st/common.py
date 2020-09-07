@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 import concurrent.futures
+import importlib.util
 import logging
 import math
 import os
@@ -10,7 +11,7 @@ import warnings
 from collections import defaultdict
 from datetime import datetime
 from functools import partial, reduce, wraps
-from itertools import combinations, product
+from itertools import combinations, islice, product
 from operator import mul
 from pathlib import Path
 from time import time
@@ -21,6 +22,7 @@ import dask.distributed
 import eli5
 import iris
 import matplotlib as mpl
+import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -30,6 +32,7 @@ import shap
 from dask.distributed import Client
 from dateutil.relativedelta import relativedelta
 from hsluv import hsluv_to_rgb, rgb_to_hsluv
+from iris.time import PartialDateTime
 from joblib import Parallel, delayed, parallel_backend
 from loguru import logger as loguru_logger
 from matplotlib.colors import SymLogNorm, from_levels_and_colors
@@ -89,11 +92,17 @@ from wildfires.utils import (
     SimpleCache,
     Time,
     ensure_datetime,
+    get_batches,
+    get_local_extrema,
+    get_local_maxima,
+    get_local_minima,
     get_masked_array,
     get_unmasked,
+    match_shape,
     replace_cube_coord,
     shorten_columns,
     shorten_features,
+    significant_peak,
 )
 
 if "TQDMAUTO" in os.environ:
@@ -140,8 +149,18 @@ experiment_color_dict = {
     experiment: color for experiment, color in zip(experiments, experiment_colors)
 }
 experiment_name_dict = {
-    experiment: name
-    for experiment, name in zip(experiments, ["all", "top 15", "no lags"])
+    "all": "all",
+    "best_top_15": "best top 15",
+    "15_most_important": "top 15",
+    "no_temporal_shifts": "no lags",
+    "fapar_only": "best top 15 (fAPAR)",
+    "sif_only": "best top 15 (SIF)",
+    "lai_only": "best top 15 (LAI)",
+    "vod_only": "best top 15 (VOD)",
+    "lagged_fapar_only": "lagged fAPAR only",
+    "lagged_sif_only": "lagged SIF only",
+    "lagged_lai_only": "lagged LAI only",
+    "lagged_vod_only": "lagged VOD only",
 }
 experiment_color_dict.update(
     {
@@ -213,6 +232,10 @@ def common_get_model_scores(rf, X_test, X_train, y_test, y_train):
         "train_r2": r2_score(y_train, y_train_pred),
         "train_mse": mean_squared_error(y_train, y_train_pred),
     }
+
+
+# Training and validation test splitting.
+train_test_split_kwargs = dict(random_state=1, shuffle=True, test_size=0.3)
 
 
 # Data filling params.
@@ -953,93 +976,255 @@ def plot_and_list_importances(importances, methods, print_n=15, N=15, verbose=Tr
 
 
 def calculate_2d_masked_shap_values(
-    X_train, master_mask, valid_train_indices, shap_values
+    X_train, master_mask, shap_values, kind="train", additional_mask=None,
 ):
-    masked_shap_arrs = []
-    masked_shap_arrs_std = []
-    vmins = []
-    vmaxs = []
-    std_vmins = []
-    std_vmaxs = []
+    shap_results = {}
 
-    for i, feature in enumerate(tqdm(X_train.columns, desc="Aggregating SHAP values")):
+    def time_abs_max(x):
+        out = np.take_along_axis(
+            x, np.argmax(np.abs(x), axis=0).reshape(1, *x.shape[1:]), axis=0
+        )
+        assert out.shape[0] == 1
+        return out[0]
+
+    agg_keys, agg_funcs = zip(
+        ("masked_shap_arrs", lambda arr: np.mean(arr, axis=0)),
+        ("masked_shap_arrs_std", lambda arr: np.std(arr, axis=0)),
+        ("masked_abs_shap_arrs", lambda arr: np.mean(np.abs(arr), axis=0)),
+        ("masked_abs_shap_arrs_std", lambda arr: np.std(np.abs(arr), axis=0)),
+        ("masked_max_shap_arrs", time_abs_max),
+    )
+    for key in agg_keys:
+        shap_results[key] = dict(data=[], vmins=[], vmaxs=[])
+
+    mm_valid_indices, mm_valid_train_indices, mm_valid_val_indices = get_mm_indices(
+        master_mask
+    )
+    if kind == "train":
+        mm_kind_indices = mm_valid_train_indices[: shap_values.shape[0]]
+    elif kind == "val":
+        mm_kind_indices = mm_valid_val_indices[: shap_values.shape[0]]
+    else:
+        raise ValueError(f"Unknown kind: {kind}.")
+
+    for i in tqdm(range(len(X_train.columns)), desc="Aggregating SHAP values"):
+        # Convert 1D shap values into 3D array (time, lat, lon).
         masked_shap_comp = np.ma.MaskedArray(
             np.zeros_like(master_mask, dtype=np.float64), mask=np.ones_like(master_mask)
         )
-        masked_shap_comp.ravel()[
-            valid_train_indices[: shap_values.shape[0]]
-        ] = shap_values[:, i]
-        avg_shap_comp = np.ma.mean(masked_shap_comp, axis=0)
-        masked_shap_arrs.append(avg_shap_comp)
-        vmins.append(np.min(avg_shap_comp))
-        vmaxs.append(np.max(avg_shap_comp))
+        masked_shap_comp.ravel()[mm_kind_indices] = shap_values[:, i]
 
-        avg_shap_std = np.ma.std(masked_shap_comp, axis=0)
-        masked_shap_arrs_std.append(avg_shap_std)
-        std_vmins.append(np.min(avg_shap_std))
-        std_vmaxs.append(np.max(avg_shap_std))
+        if additional_mask is not None:
+            masked_shap_comp.mask |= match_shape(
+                additional_mask, masked_shap_comp.shape
+            )
 
-    vmin = min(vmins)
-    vmax = max(vmaxs)
+        # Calculate different aggregations over time.
 
-    std_vmin = min(std_vmins)
-    std_vmax = max(std_vmaxs)
+        for key, agg_func in zip(agg_keys, agg_funcs):
+            agg_shap = agg_func(masked_shap_comp)
+            shap_results[key]["data"].append(agg_shap)
+            shap_results[key]["vmins"].append(np.min(agg_shap))
+            shap_results[key]["vmaxs"].append(np.max(agg_shap))
 
-    return masked_shap_arrs, masked_shap_arrs_std, vmin, vmax, std_vmin, std_vmax
+    # Calculate relative standard deviations.
+
+    rel_agg_keys = [
+        "masked_shap_arrs_rel_std",
+        "masked_abs_shap_arrs_rel_std",
+    ]
+    rel_agg_sources_keys = [
+        ("masked_shap_arrs", "masked_shap_arrs_std"),
+        ("masked_abs_shap_arrs", "masked_abs_shap_arrs_std"),
+    ]
+    for rel_agg_key, rel_agg_sources_key in zip(rel_agg_keys, rel_agg_sources_keys):
+        shap_results[rel_agg_key] = dict(data=[], vmins=[], vmaxs=[])
+        for i in range(len(X_train.columns)):
+            rel_agg_shap = shap_results[rel_agg_sources_key[1]]["data"][i] / np.ma.abs(
+                shap_results[rel_agg_sources_key[0]]["data"][i]
+            )
+            shap_results[rel_agg_key]["data"].append(rel_agg_shap)
+            shap_results[rel_agg_key]["vmins"].append(np.min(rel_agg_shap))
+            shap_results[rel_agg_key]["vmaxs"].append(np.max(rel_agg_shap))
+
+    for key, values in shap_results.items():
+        values["vmin"] = min(values["vmins"])
+        values["vmax"] = max(values["vmaxs"])
+
+    return shap_results
 
 
 def plot_shap_value_maps(
-    X_train,
-    masked_shap_arrs,
-    masked_shap_arrs_std,
-    vmin,
-    vmax,
-    std_vmin,
-    std_vmax,
-    map_figure_saver,
+    X_train, shap_results, map_figure_saver, directory="shap_maps",
 ):
+    """
+
+    Args:
+        X_train (pandas DataFrame):
+        shap_results (SHAP results dict from `calculate_2d_masked_shap_values`):
+        map_figure_saver (FigureSaver instance):
+
+    """
+    # Define common plotting profiles, as `cube_plotting` kwargs.
+
+    def get_plot_kwargs(feature, results_dict, title_stub, kind=None):
+        kwargs = dict(
+            fig=plt.figure(figsize=(5.1, 2.8)),
+            title=f"{title_stub} '{shorten_features(feature)}'",
+            nbins=7,
+            vmin=results_dict["vmin"],
+            vmax=results_dict["vmax"],
+            log=True,
+            log_auto_bins=False,
+            extend="neither",
+            min_edge=1e-3,
+            cmap="inferno",
+            colorbar_kwargs={
+                "format": "%0.1e",
+                "label": f"SHAP ('{shorten_features(feature)}')",
+            },
+            coastline_kwargs={"linewidth": 0.3},
+        )
+        if kind == "mean":
+            kwargs.update(
+                cmap="Spectral_r", cmap_midpoint=0, cmap_symmetric=True,
+            )
+        if kind == "rel_std":
+            kwargs.update(
+                vmin=1e-2, vmax=10, extend="both", nbins=5,
+            )
+        return kwargs
+
     for i, feature in enumerate(tqdm(X_train.columns, desc="Mapping SHAP values")):
-        fig = cube_plotting(
-            masked_shap_arrs[i],
-            fig=plt.figure(figsize=(5.1, 2.8)),
-            title=f"Mean SHAP value for '{shorten_features(feature)}'",
-            cmap="Spectral_r",
-            nbins=7,
-            cmap_midpoint=0,
-            cmap_symmetric=True,
-            vmin=vmin,
-            vmax=vmax,
-            log=True,
-            log_auto_bins=False,
-            min_edge=1e-3,
-            extend="neither",
-            colorbar_kwargs={
-                "format": "%0.1e",
-                "label": f"SHAP ('{shorten_features(feature)}')",
-            },
-            coastline_kwargs={"linewidth": 0.3},
+        for agg_key, title_stub, kind, sub_directory in (
+            ("masked_shap_arrs", "Mean SHAP value for", "mean", "mean"),
+            ("masked_shap_arrs_std", "STD SHAP value for", None, "std"),
+            (
+                "masked_shap_arrs_rel_std",
+                "Rel STD SHAP value for",
+                "rel_std",
+                "rel_std",
+            ),
+            ("masked_abs_shap_arrs", "Mean |SHAP| value for", None, "abs_mean"),
+            ("masked_abs_shap_arrs_std", "STD |SHAP| value for", None, "abs_std"),
+            (
+                "masked_abs_shap_arrs_rel_std",
+                "Rel STD |SHAP| value for",
+                "rel_std",
+                "rel_abs_std",
+            ),
+            ("masked_max_shap_arrs", "Max || SHAP value for", "mean", "max"),
+        ):
+            fig = cube_plotting(
+                shap_results[agg_key]["data"][i],
+                **get_plot_kwargs(
+                    feature,
+                    results_dict=shap_results[agg_key],
+                    title_stub=title_stub,
+                    kind=kind,
+                ),
+            )
+            map_figure_saver.save_figure(
+                fig,
+                f"{agg_key}_{feature}",
+                sub_directory=Path(directory) / sub_directory,
+            )
+
+
+def get_mm_indices(master_mask):
+    mm_valid_indices = np.where(~master_mask.ravel())[0]
+    mm_valid_train_indices, mm_valid_val_indices = train_test_split(
+        mm_valid_indices, **train_test_split_kwargs,
+    )
+    return mm_valid_indices, mm_valid_train_indices, mm_valid_val_indices
+
+
+def get_mm_data(x, master_mask, kind):
+    """Return masked master_mask copy and training or validation indices.
+
+    The master_mask copy is filled using the given data.
+
+    Args:
+        x (array-like): Data to use.
+        master_mask (array):
+        kind ({'train', 'val'})
+
+    Returns:
+        masked_data, mm_indices:
+
+    """
+    mm_valid_indices, mm_valid_train_indices, mm_valid_val_indices = get_mm_indices(
+        master_mask
+    )
+    masked_data = np.ma.MaskedArray(
+        np.zeros_like(master_mask, dtype=np.float64), mask=np.ones_like(master_mask)
+    )
+    if kind == "train":
+        masked_data.ravel()[mm_valid_train_indices] = x
+    elif kind == "val":
+        masked_data.ravel()[mm_valid_val_indices] = x
+    else:
+        raise ValueError(f"Unknown kind: {kind}")
+    return masked_data
+
+
+def load_experiment_data(folders, which="all"):
+    """Load data from specified experiments.
+
+    Args:
+        folders (iterable of {str, Path}): Folder names corresponding to the
+            experiments to load data for.
+        which (iterable of {'all', 'offset_data', 'model', 'data_split', 'model_scores'}):
+            'all' loads everything.
+
+    Returns:
+        dict of dict: Keys are the given `folders` and the loaded data types.
+
+    """
+    data = defaultdict(dict)
+    if which == "all":
+        which = ("offset_data", "model", "data_split", "model_scores")
+
+    for experiment in folders:
+        # Load the experiment module.
+        spec = importlib.util.spec_from_file_location(
+            f"{experiment}_specific", str(PAPER_DIR / experiment / "specific.py"),
         )
-        map_figure_saver.save_figure(
-            fig, f"shap_value_map_{feature}", sub_directory="shap_map"
-        )
-        fig = cube_plotting(
-            masked_shap_arrs_std[i],
-            fig=plt.figure(figsize=(5.1, 2.8)),
-            title=f"STD SHAP value for '{shorten_features(feature)}'",
-            cmap="YlOrRd",
-            nbins=7,
-            vmin=std_vmin,
-            vmax=std_vmax,
-            log=True,
-            log_auto_bins=False,
-            min_edge=1e-3,
-            extend="neither",
-            colorbar_kwargs={
-                "format": "%0.1e",
-                "label": f"SHAP ('{shorten_features(feature)}')",
-            },
-            coastline_kwargs={"linewidth": 0.3},
-        )
-        map_figure_saver.save_figure(
-            fig, f"shap_value_std_map_{feature}", sub_directory="shap_map_std"
-        )
+        module = importlib.util.module_from_spec(spec)
+        data[experiment]["module"] = module
+        # Load module contents.
+        spec.loader.exec_module(module)
+
+        if "offset_data" in which:
+            data[experiment].update(
+                {
+                    key: data
+                    for key, data in zip(
+                        (
+                            "endog_data",
+                            "exog_data",
+                            "master_mask",
+                            "filled_datasets",
+                            "masked_datasets",
+                            "land_mask",
+                        ),
+                        module.get_offset_data(),
+                    )
+                }
+            )
+        if "model" in which:
+            data[experiment]["model"] = module.get_model()
+        if "data_split" in which:
+            data[experiment].update(
+                {
+                    key: data
+                    for key, data in zip(
+                        ("X_train", "X_test", "y_train", "y_test"),
+                        module.data_split_cache.load(),
+                    )
+                }
+            )
+        if "model_scores" in which:
+            data[experiment].update(module.get_model_scores())
+
+    return data

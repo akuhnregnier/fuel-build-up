@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-import importlib.util
 import sys
 import warnings
 from pathlib import Path
@@ -26,57 +25,6 @@ map_figure_saver = figure_saver(**map_figure_saver_kwargs)
 
 memory = get_memory("__".join((PROJECT_DIR.parent.name, PROJECT_DIR.name)), verbose=100)
 CACHE_DIR = Path(DATA_DIR) / ".pickle" / PROJECT_DIR.parent.name / PROJECT_DIR.name
-
-
-def load_experiment_data(folders):
-    """Load data from specified experiments.
-
-    Args:
-        folders (iterable of {str, Path}): Folder names corresponding to the
-            experiments to load data for.
-
-    Returns:
-        dict of dict: Keys are the given `folders` and the loaded data types.
-
-    """
-    data = defaultdict(dict)
-
-    for experiment in folders:
-        # Load the different experiments' modules.
-        spec = importlib.util.spec_from_file_location(
-            f"{experiment}_specific",
-            str(PROJECT_DIR.parent / experiment / "specific.py"),
-        )
-        data[experiment]["module"] = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(data[experiment]["module"])
-        data[experiment].update(
-            {
-                key: data
-                for key, data in zip(
-                    (
-                        "endog_data",
-                        "exog_data",
-                        "master_mask",
-                        "filled_datasets",
-                        "masked_datasets",
-                        "land_mask",
-                    ),
-                    data[experiment]["module"].get_offset_data(),
-                )
-            }
-        )
-        data[experiment]["model"] = data[experiment]["module"].get_model()
-        data[experiment].update(
-            {
-                key: data
-                for key, data in zip(
-                    ("X_train", "X_test", "y_train", "y_test"),
-                    data[experiment]["module"].data_split_cache.load(),
-                )
-            }
-        )
-
-    return data
 
 
 def multi_model_ale_plot_1d(
