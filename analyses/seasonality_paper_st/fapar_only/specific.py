@@ -16,11 +16,13 @@ warnings.filterwarnings(
     "always", category=FutureWarning, module="sklearn.utils.deprecation"
 )
 
-figure_saver = FigureSaver(
+figure_saver = PaperFigureSaver(
     directories=Path("~") / "tmp" / PROJECT_DIR.parent.name / PROJECT_DIR.name,
     debug=True,
 )
 map_figure_saver = figure_saver(**map_figure_saver_kwargs)
+for fig_saver in (figure_saver, map_figure_saver):
+    fig_saver.experiment = PROJECT_DIR.name
 
 memory = get_memory("__".join((PROJECT_DIR.parent.name, PROJECT_DIR.name)), verbose=100)
 CACHE_DIR = Path(DATA_DIR) / ".pickle" / PROJECT_DIR.parent.name / PROJECT_DIR.name

@@ -24,6 +24,7 @@ import iris
 import matplotlib as mpl
 import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
+import matplotlib.ticker as ticker
 import numpy as np
 import pandas as pd
 import scipy
@@ -36,6 +37,7 @@ from iris.time import PartialDateTime
 from joblib import Parallel, delayed, parallel_backend
 from loguru import logger as loguru_logger
 from matplotlib.colors import SymLogNorm, from_levels_and_colors
+from matplotlib.lines import Line2D
 from matplotlib.patches import Rectangle
 from sklearn.base import clone
 from sklearn.metrics import mean_squared_error, r2_score
@@ -93,6 +95,7 @@ from wildfires.utils import (
     Time,
     ensure_datetime,
     get_batches,
+    get_centres,
     get_local_extrema,
     get_local_maxima,
     get_local_minima,
@@ -103,6 +106,7 @@ from wildfires.utils import (
     shorten_columns,
     shorten_features,
     significant_peak,
+    simple_sci_format,
 )
 
 if "TQDMAUTO" in os.environ:
@@ -135,7 +139,26 @@ data_memory = get_memory(PAPER_DIR.name, backend="cloudpickle", verbose=2)
 
 map_figure_saver_kwargs = {"dpi": 1200}
 
-figure_saver = FigureSaver(directories=Path("~") / "tmp" / PAPER_DIR.name, debug=True)
+
+class PaperFigureSaver(FigureSaver):
+    def save_figure(self, fig, filename, directory=None, sub_directory=None, **kwargs):
+        # Make sure that the name of the experiment is present.
+        filename = Path(filename)
+        if not re.match(self.experiment + "_", filename.name):
+            filename = filename.with_name("_".join((self.experiment, filename.name)))
+
+        super().save_figure(
+            fig,
+            str(filename),
+            directory=directory,
+            sub_directory=sub_directory,
+            **kwargs,
+        )
+
+
+figure_saver = PaperFigureSaver(
+    directories=Path("~") / "tmp" / PAPER_DIR.name, debug=True
+)
 map_figure_saver = figure_saver(**map_figure_saver_kwargs)
 
 # 9 colors used to differentiate varying the lags throughout.
@@ -143,7 +166,7 @@ lags = [0, 1, 3, 6, 9, 12, 18, 24]
 lag_colors = sns.color_palette("Set1", desat=0.85)
 lag_color_dict = {lag: color for lag, color in zip(lags, lag_colors)}
 
-experiments = ["all", "15_most_important", "no_temporal_shifts"]
+experiments = ["all", "15_most_important", "no_temporal_shifts", "best_top_15"]
 experiment_colors = sns.color_palette("Set2")
 experiment_color_dict = {
     experiment: color for experiment, color in zip(experiments, experiment_colors)
@@ -169,7 +192,7 @@ experiment_color_dict.update(
     }
 )
 
-experiment_markers = ["<", "o", ">"]
+experiment_markers = ["<", "o", ">", "x"]
 experiment_marker_dict = {
     experiment: marker for experiment, marker in zip(experiments, experiment_markers)
 }
@@ -252,7 +275,7 @@ def fill_name(name):
 
 def get_filled_names(names):
     if isinstance(names, str):
-        return get_filled_names((names,))
+        return get_filled_names((names,))[0]
     filled = []
     for name in names:
         if any(var in name for var in filled_variables):
@@ -269,7 +292,7 @@ def repl_fill_name(name, sub=""):
 
 def repl_fill_names(names, sub=""):
     if isinstance(names, str):
-        return repl_fill_names((names,), sub=sub)
+        return repl_fill_names((names,), sub=sub)[0]
     return [repl_fill_name(name, sub=sub) for name in names]
 
 
@@ -785,22 +808,34 @@ def multi_ale_plot_1d(
     n_jobs=8,
     verbose=False,
     figure_saver=None,
+    CACHE_DIR=None,
+    bins=20,
 ):
     fig, ax = plt.subplots(
-        figsize=(7.5, 4.5)
+        figsize=(7, 3)
     )  # Make sure plot is plotted onto a new figure.
-    model.n_jobs = n_jobs
-    with parallel_backend("threading", n_jobs=n_jobs):
-        quantile_list = []
-        ale_list = []
-        for feature in tqdm(
-            columns, desc="Calculating feature ALEs", disable=not verbose
-        ):
-            quantiles, ale = first_order_ale_quant(
-                model.predict, X_train, feature, bins=20
-            )
-            quantile_list.append(quantiles)
-            ale_list.append(ale)
+
+    quantile_list = []
+    ale_list = []
+    for feature in tqdm(columns, desc="Calculating feature ALEs", disable=not verbose):
+        cache = SimpleCache(
+            f"{feature}_ale_{bins}",
+            cache_dir=CACHE_DIR / "ale",
+            verbose=10 if verbose else 0,
+        )
+        try:
+            quantiles, ale = cache.load()
+        except NoCachedDataError:
+            model.n_jobs = n_jobs
+
+            with parallel_backend("threading", n_jobs=n_jobs):
+                quantiles, ale = first_order_ale_quant(
+                    model.predict, X_train, feature, bins=bins
+                )
+                cache.save((quantiles, ale))
+
+        quantile_list.append(quantiles)
+        ale_list.append(ale)
 
     # Construct quantiles from the individual quantiles, minimising the amount of interpolation.
     combined_quantiles = np.vstack([quantiles[None] for quantiles in quantile_list])
@@ -821,10 +856,16 @@ def multi_ale_plot_1d(
             label=feature,
         )
 
-    ax.legend(loc="best")
-    ax.set_xticks(mod_quantiles)
-    ax.set_xticklabels(_sci_format(final_quantiles, scilim=0.6))
-    ax.xaxis.set_tick_params(rotation=45)
+    ax.legend(loc="best", ncol=2)
+
+    ax.set_xticks(mod_quantiles[::2])
+    ax.set_xticklabels(_sci_format(final_quantiles[::2], scilim=0.6))
+    ax.xaxis.set_tick_params(rotation=20)
+
+    ax.yaxis.set_major_formatter(
+        ticker.FuncFormatter(lambda x, pos: simple_sci_format(x))
+    )
+
     ax.grid(alpha=0.4, linestyle="--")
 
     fig.suptitle(title)
@@ -878,14 +919,25 @@ def get_lag(feature, target_feature=None):
         target_feature = re.escape(target_feature)
 
     # Avoid dealing with the fill naming.
-    feature = feature.replace(fill_name(""), "")
+    feature = repl_fill_name(feature)
 
     match = re.search(target_feature + r"\s-(\d+)\s", feature)
+
+    if match is None:
+        # Try matching to 'short names'.
+        match = re.search(target_feature + r"(\d+)\sM", feature)
+
     if match is not None:
         return int(match.groups(default="0")[0])
     if match is None and re.match(target_feature, feature):
         return 0
     return None
+
+
+def get_lags(features, target_feature=None):
+    if not isinstance(features, str):
+        return [get_lag(feature, target_feature=target_feature) for feature in features]
+    return get_lag(feature, target_feature=target_feature)
 
 
 def filter_by_month(features, target_feature, max_month):
@@ -908,6 +960,28 @@ def filter_by_month(features, target_feature, max_month):
     return filtered
 
 
+def sort_experiments(experiments):
+    """Sort experiments based on `experiment_name_dict`."""
+    name_lists = (
+        list(experiment_name_dict.keys()),
+        list(experiment_name_dict.values()),
+    )
+    order = []
+    experiments = list(experiments)
+    for experiment in experiments:
+        for name_list in name_lists:
+            if experiment in name_list:
+                order.append(name_list.index(experiment))
+                break
+        else:
+            # No break encountered, so no order could be found.
+            raise ValueError(f"Experiment {experiment} could not be found.")
+    out = []
+    for i in np.argsort(order):
+        out.append(experiments[i])
+    return out
+
+
 def sort_features(features):
     """Sort feature names using their names and shift magnitudes.
 
@@ -924,7 +998,7 @@ def sort_features(features):
         lag = get_lag(feature)
         assert lag is not None
         # Remove fill naming addition.
-        feature = feature.replace(fill_name(""), "")
+        feature = repl_fill_name(feature)
         if str(lag) in feature:
             # Strip lag information from the string.
             raw_features.append(feature[: feature.index(str(lag))].strip("-").strip())
@@ -1055,7 +1129,7 @@ def calculate_2d_masked_shap_values(
 
 
 def plot_shap_value_maps(
-    X_train, shap_results, map_figure_saver, directory="shap_maps",
+    X_train, shap_results, map_figure_saver, directory="shap_maps", close=True
 ):
     """
 
@@ -1063,6 +1137,8 @@ def plot_shap_value_maps(
         X_train (pandas DataFrame):
         shap_results (SHAP results dict from `calculate_2d_masked_shap_values`):
         map_figure_saver (FigureSaver instance):
+        directory (str or Path): Figure saving directory.
+        close (bool): If True, close figures after saving.
 
     """
     # Define common plotting profiles, as `cube_plotting` kwargs.
@@ -1129,6 +1205,8 @@ def plot_shap_value_maps(
                 f"{agg_key}_{feature}",
                 sub_directory=Path(directory) / sub_directory,
             )
+            if close:
+                plt.close(fig)
 
 
 def get_mm_indices(master_mask):
@@ -1168,7 +1246,7 @@ def get_mm_data(x, master_mask, kind):
     return masked_data
 
 
-def load_experiment_data(folders, which="all"):
+def load_experiment_data(folders, which="all", ignore=()):
     """Load data from specified experiments.
 
     Args:
@@ -1176,6 +1254,7 @@ def load_experiment_data(folders, which="all"):
             experiments to load data for.
         which (iterable of {'all', 'offset_data', 'model', 'data_split', 'model_scores'}):
             'all' loads everything.
+        ignore (iterable of str): Subsets of the above the ignore.
 
     Returns:
         dict of dict: Keys are the given `folders` and the loaded data types.
@@ -1201,12 +1280,16 @@ def load_experiment_data(folders, which="all"):
                     key: data
                     for key, data in zip(
                         (
-                            "endog_data",
-                            "exog_data",
-                            "master_mask",
-                            "filled_datasets",
-                            "masked_datasets",
-                            "land_mask",
+                            key
+                            for key in (
+                                "endog_data",
+                                "exog_data",
+                                "master_mask",
+                                "filled_datasets",
+                                "masked_datasets",
+                                "land_mask",
+                            )
+                            if key not in ignore
                         ),
                         module.get_offset_data(),
                     )
@@ -1219,7 +1302,11 @@ def load_experiment_data(folders, which="all"):
                 {
                     key: data
                     for key, data in zip(
-                        ("X_train", "X_test", "y_train", "y_test"),
+                        (
+                            key
+                            for key in ("X_train", "X_test", "y_train", "y_test")
+                            if key not in ignore
+                        ),
                         module.data_split_cache.load(),
                     )
                 }
@@ -1228,3 +1315,115 @@ def load_experiment_data(folders, which="all"):
             data[experiment].update(module.get_model_scores())
 
     return data
+
+
+def ba_plotting(predicted_ba, masked_val_data, figure_saver):
+    # date_str = "2010-01 to 2015-04"
+    text_xy = (0.012, 0.95)
+    fs = 11
+
+    fig, axes = plt.subplots(
+        3,
+        1,
+        subplot_kw={"projection": ccrs.Robinson()},
+        figsize=(5.1, 2.3 * 3),
+        gridspec_kw={"hspace": 0.01, "wspace": 0.01},
+    )
+
+    # Plotting params.
+
+    cbar_fmt = ticker.FuncFormatter(lambda x, pos: simple_sci_format(x))
+
+    def get_plot_kwargs(cbar_label="Burned Area Fraction", **kwargs):
+        colorbar_kwargs = kwargs.pop("colorbar_kwargs", {})
+        return {
+            **dict(
+                colorbar_kwargs={
+                    "label": cbar_label,
+                    "format": cbar_fmt,
+                    **colorbar_kwargs,
+                },
+                coastline_kwargs={"linewidth": 0.3},
+                cmap="brewer_RdYlBu_11",
+            ),
+            **kwargs,
+        }
+
+    assert np.all(predicted_ba.mask == masked_val_data.mask)
+
+    boundaries = [1e-5, 1e-4, 1e-3, 1e-2, 1e-1]
+
+    cmap = "YlOrRd"
+    extend = "both"
+
+    # Plotting observed.
+    fig = cube_plotting(
+        masked_val_data,
+        ax=axes[0],
+        **get_plot_kwargs(
+            cmap=cmap,
+            #         title=f"Observed BA\n{date_str}",
+            title="",
+            boundaries=boundaries,
+            extend=extend,
+        ),
+    )
+    axes[0].text(*text_xy, "(a)", transform=axes[0].transAxes, fontsize=fs)
+
+    # Plotting predicted.
+    fig = cube_plotting(
+        predicted_ba,
+        ax=axes[1],
+        **get_plot_kwargs(
+            cmap=cmap,
+            #         title=f"Predicted BA\n{date_str}",
+            title="",
+            boundaries=boundaries,
+            extend=extend,
+        ),
+    )
+    axes[1].text(*text_xy, "(b)", transform=axes[1].transAxes, fontsize=fs)
+
+    frac_diffs = (masked_val_data - predicted_ba) / masked_val_data
+
+    # Plotting differences.
+    diff_boundaries = [-1e1, -1e0, 0, 1e-1]
+    extend = "both"
+
+    fig = cube_plotting(
+        frac_diffs,
+        ax=axes[2],
+        **get_plot_kwargs(
+            #         title=f"BA Discrepancy <(Obs. - Pred.) / Obs.> \n{date_str}",
+            title="",
+            cmap_midpoint=0,
+            boundaries=diff_boundaries,
+            colorbar_kwargs={"label": "(Obs. - Pred.) / Obs."},
+            extend=extend,
+        ),
+    )
+    axes[2].text(*text_xy, "(c)", transform=axes[2].transAxes, fontsize=fs)
+
+    # Plot relative MSEs.
+    """
+    rel_mse = frac_diffs ** 2
+
+    # Plotting differences.
+    diff_boundaries = [1e-1, 1, 1e1, 1e2, 1e3]
+    extend = "both"
+
+    fig = cube_plotting(
+        rel_mse,
+        **get_plot_kwargs(
+            cmap="inferno",
+    #         title=r"BA Discrepancy <$\mathrm{((Obs. - Pred.) / Obs.)}^2$>" + f"\n{date_str}",
+            title='',
+            boundaries=diff_boundaries,
+            colorbar_kwargs={"label": "1"},
+            extend=extend,
+        ),
+    )
+    plt.gca().text(*text_xy, '(d)', transform=plt.gca().transAxes, fontsize=fs)
+
+    """
+    figure_saver.save_figure(fig, f"ba_prediction", sub_directory="predictions")
