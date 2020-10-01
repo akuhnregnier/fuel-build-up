@@ -141,6 +141,17 @@ map_figure_saver_kwargs = {"dpi": 1200}
 
 
 class PaperFigureSaver(FigureSaver):
+    experiment = "common"
+
+    @wraps(FigureSaver.__call__)
+    def __call__(self, filenames=None, sub_directory=None, **kwargs):
+        new_inst = super().__call__(
+            filenames=filenames, sub_directory=sub_directory, **kwargs
+        )
+        new_inst.experiment = self.experiment
+        return new_inst
+
+    @wraps(FigureSaver.save_figure)
     def save_figure(self, fig, filename, directory=None, sub_directory=None, **kwargs):
         # Make sure that the name of the experiment is present.
         filename = Path(filename)
@@ -294,6 +305,16 @@ def repl_fill_names(names, sub=""):
     if isinstance(names, str):
         return repl_fill_names((names,), sub=sub)[0]
     return [repl_fill_name(name, sub=sub) for name in names]
+
+
+def repl_fill_names_columns(df, inplace=False, sub=""):
+    return df.rename(
+        columns=dict(
+            (orig, short)
+            for orig, short in zip(df.columns, repl_fill_names(df.columns, sub=sub))
+        ),
+        inplace=inplace,
+    )
 
 
 feature_categories = {
@@ -801,7 +822,9 @@ def multi_ale_plot_1d(
     model,
     X_train,
     columns,
-    fig_name,
+    fig_name=None,
+    fig=None,
+    ax=None,
     xlabel=None,
     ylabel=None,
     title=None,
@@ -810,10 +833,16 @@ def multi_ale_plot_1d(
     figure_saver=None,
     CACHE_DIR=None,
     bins=20,
+    x_rotation=20,
 ):
-    fig, ax = plt.subplots(
-        figsize=(7, 3)
-    )  # Make sure plot is plotted onto a new figure.
+    if fig is None and ax is None:
+        fig, ax = plt.subplots(
+            figsize=(7, 3)
+        )  # Make sure plot is plotted onto a new figure.
+    elif fig is None:
+        fig = ax.get_figure()
+    if ax is None:
+        ax = plt.axes()
 
     quantile_list = []
     ale_list = []
@@ -860,7 +889,7 @@ def multi_ale_plot_1d(
 
     ax.set_xticks(mod_quantiles[::2])
     ax.set_xticklabels(_sci_format(final_quantiles[::2], scilim=0.6))
-    ax.xaxis.set_tick_params(rotation=20)
+    ax.xaxis.set_tick_params(rotation=x_rotation)
 
     ax.yaxis.set_major_formatter(
         ticker.FuncFormatter(lambda x, pos: simple_sci_format(x))
@@ -1280,19 +1309,16 @@ def load_experiment_data(folders, which="all", ignore=()):
                     key: data
                     for key, data in zip(
                         (
-                            key
-                            for key in (
-                                "endog_data",
-                                "exog_data",
-                                "master_mask",
-                                "filled_datasets",
-                                "masked_datasets",
-                                "land_mask",
-                            )
-                            if key not in ignore
+                            "endog_data",
+                            "exog_data",
+                            "master_mask",
+                            "filled_datasets",
+                            "masked_datasets",
+                            "land_mask",
                         ),
                         module.get_offset_data(),
                     )
+                    if key not in ignore
                 }
             )
         if "model" in which:
@@ -1353,7 +1379,7 @@ def ba_plotting(predicted_ba, masked_val_data, figure_saver):
 
     boundaries = [1e-5, 1e-4, 1e-3, 1e-2, 1e-1]
 
-    cmap = "YlOrRd"
+    cmap = "inferno"
     extend = "both"
 
     # Plotting observed.
@@ -1384,7 +1410,10 @@ def ba_plotting(predicted_ba, masked_val_data, figure_saver):
     )
     axes[1].text(*text_xy, "(b)", transform=axes[1].transAxes, fontsize=fs)
 
-    frac_diffs = (masked_val_data - predicted_ba) / masked_val_data
+    # frac_diffs = (masked_val_data - predicted_ba) / masked_val_data
+    frac_diffs = np.mean(masked_val_data - predicted_ba, axis=0) / np.mean(
+        masked_val_data, axis=0
+    )
 
     # Plotting differences.
     diff_boundaries = [-1e1, -1e0, 0, 1e-1]
@@ -1398,7 +1427,7 @@ def ba_plotting(predicted_ba, masked_val_data, figure_saver):
             title="",
             cmap_midpoint=0,
             boundaries=diff_boundaries,
-            colorbar_kwargs={"label": "(Obs. - Pred.) / Obs."},
+            colorbar_kwargs={"label": "<(Obs. - Pred.)> / <Obs.>"},
             extend=extend,
         ),
     )
