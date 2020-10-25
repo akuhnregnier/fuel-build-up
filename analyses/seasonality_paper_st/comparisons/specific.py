@@ -122,6 +122,10 @@ def multi_model_ale_1d(
     figure_saver=None,
     single_figsize=(5.4, 1.5),
     legend_bbox=(0.5, 0.5),
+    fig=None,
+    axes=None,
+    legend=True,
+    legend_labels=None,
 ):
     assert set(experiment_data) == set(experiment_plot_kwargs)
     plotted_experiments = set()
@@ -139,7 +143,6 @@ def multi_model_ale_1d(
 
         experiment_count = 0
         for experiment, single_experiment_data in experiment_data.items():
-
             # Skip experiments that do not contain this feature.
             if feature not in single_experiment_data["X_train"]:
                 continue
@@ -162,9 +165,16 @@ def multi_model_ale_1d(
     n_cols = 2
     n_rows = math.ceil(n_plots / n_cols)
 
-    fig, axes = plt.subplots(
-        n_rows, n_cols, figsize=np.array(single_figsize) * np.array([n_cols, n_rows])
-    )
+    if fig is None and axes is None:
+        fig, axes = plt.subplots(
+            n_rows,
+            n_cols,
+            figsize=np.array(single_figsize) * np.array([n_cols, n_rows]),
+        )
+    elif fig is not None and axes is not None:
+        pass
+    else:
+        raise ValueError("Either both or none of fig and axes need to be given.")
 
     # Disable unused axes.
     if len(axes.flatten()) > n_plots:
@@ -185,7 +195,11 @@ def multi_model_ale_1d(
     @ticker.FuncFormatter
     def major_formatter(x, pos):
         t = np.format_float_scientific(x, precision=1, unique=False, exp_digits=1)
-        return t if t != "0.0e+0" else "0"
+        if t == "0.0e+0":
+            return "0"
+        elif ".0" in t:
+            return t.replace(".0", "")
+        return t
 
     for ax in axes.flatten()[:n_plots]:
         ax.yaxis.set_major_formatter(major_formatter)
@@ -201,13 +215,16 @@ def multi_model_ale_1d(
         lines.append(Line2D([0], [0], **experiment_plot_kwargs[experiment]))
         labels.append(experiment_plot_kwargs[experiment]["label"])
 
-    fig.legend(
-        lines,
-        labels,
-        loc="center",
-        bbox_to_anchor=legend_bbox,
-        ncol=len(labels) if len(labels) <= 6 else 6,
-    )
+    labels = labels if legend_labels is None else legend_labels
+
+    if legend:
+        fig.legend(
+            lines,
+            labels,
+            loc="center",
+            bbox_to_anchor=legend_bbox,
+            ncol=len(labels) if len(labels) <= 6 else 6,
+        )
 
     if figure_saver is not None:
         figure_saver.save_figure(

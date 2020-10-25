@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 import concurrent.futures
+import importlib.util
 import logging
 import math
 import os
@@ -27,6 +28,7 @@ import pandas as pd
 import scipy
 import seaborn as sns
 import shap
+from alepython.ale import _sci_format, ale_plot, first_order_ale_quant
 from dask.distributed import Client
 from dateutil.relativedelta import relativedelta
 from hsluv import hsluv_to_rgb, rgb_to_hsluv
@@ -34,12 +36,10 @@ from joblib import Parallel, delayed, parallel_backend
 from loguru import logger as loguru_logger
 from matplotlib.colors import SymLogNorm, from_levels_and_colors
 from matplotlib.patches import Rectangle
+from pdpbox import pdp
 from sklearn.base import clone
 from sklearn.metrics import mean_squared_error, r2_score
 from sklearn.model_selection import train_test_split
-
-from alepython.ale import _sci_format, ale_plot, first_order_ale_quant
-from pdpbox import pdp
 from wildfires.analysis import (
     FigureSaver,
     MidpointNormalize,
@@ -134,14 +134,24 @@ lags = [0, 1, 3, 6, 9, 12, 18, 24]
 lag_colors = sns.color_palette("Set1", desat=0.85)
 lag_color_dict = {lag: color for lag, color in zip(lags, lag_colors)}
 
-experiments = ["all", "15_most_important", "no_temporal_shifts"]
+experiments = ["all", "15_most_important", "no_temporal_shifts", "best_top_15"]
 experiment_colors = sns.color_palette("Set2")
 experiment_color_dict = {
     experiment: color for experiment, color in zip(experiments, experiment_colors)
 }
 experiment_name_dict = {
-    experiment: name
-    for experiment, name in zip(experiments, ["all", "top 15", "no lags"])
+    "all": "all",
+    "best_top_15": "best top 15",
+    "15_most_important": "top 15",
+    "no_temporal_shifts": "no lags",
+    "fapar_only": "best top 15 (fAPAR)",
+    "sif_only": "best top 15 (SIF)",
+    "lai_only": "best top 15 (LAI)",
+    "vod_only": "best top 15 (VOD)",
+    "lagged_fapar_only": "lagged fAPAR only",
+    "lagged_sif_only": "lagged SIF only",
+    "lagged_lai_only": "lagged LAI only",
+    "lagged_vod_only": "lagged VOD only",
 }
 experiment_color_dict.update(
     {
@@ -150,7 +160,7 @@ experiment_color_dict.update(
     }
 )
 
-experiment_markers = ["<", "o", ">"]
+experiment_markers = ["<", "o", ">", "x"]
 experiment_marker_dict = {
     experiment: marker for experiment, marker in zip(experiments, experiment_markers)
 }
@@ -1016,3 +1026,72 @@ def plot_shap_value_maps(
         map_figure_saver.save_figure(
             fig, f"shap_value_std_map_{feature}", sub_directory="shap_map_std"
         )
+
+
+def load_experiment_data(folders, which="all", ignore=()):
+    """Load data from specified experiments.
+
+    Args:
+        folders (iterable of {str, Path}): Folder names corresponding to the
+            experiments to load data for.
+        which (iterable of {'all', 'offset_data', 'model', 'data_split', 'model_scores'}):
+            'all' loads everything.
+        ignore (iterable of str): Subsets of the above the ignore.
+
+    Returns:
+        dict of dict: Keys are the given `folders` and the loaded data types.
+
+    """
+    data = defaultdict(dict)
+    if which == "all":
+        which = ("offset_data", "model", "data_split", "model_scores")
+
+    for experiment in folders:
+        # Load the experiment module.
+        spec = importlib.util.spec_from_file_location(
+            f"{experiment}_specific",
+            str(PAPER_DIR / experiment / "specific.py"),
+        )
+        module = importlib.util.module_from_spec(spec)
+        data[experiment]["module"] = module
+        # Load module contents.
+        spec.loader.exec_module(module)
+
+        if "offset_data" in which:
+            data[experiment].update(
+                {
+                    key: data
+                    for key, data in zip(
+                        (
+                            "endog_data",
+                            "exog_data",
+                            "master_mask",
+                            "filled_datasets",
+                            "masked_datasets",
+                            "land_mask",
+                        ),
+                        module.get_offset_data(),
+                    )
+                    if key not in ignore
+                }
+            )
+        if "model" in which:
+            data[experiment]["model"] = module.get_model()
+        if "data_split" in which:
+            data[experiment].update(
+                {
+                    key: data
+                    for key, data in zip(
+                        (
+                            key
+                            for key in ("X_train", "X_test", "y_train", "y_test")
+                            if key not in ignore
+                        ),
+                        module.data_split_cache.load(),
+                    )
+                }
+            )
+        if "model_scores" in which:
+            data[experiment].update(module.get_model_scores())
+
+    return data

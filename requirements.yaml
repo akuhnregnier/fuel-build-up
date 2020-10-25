@@ -39,6 +39,7 @@ dependencies:
   - netcdf4
   - nodejs
   - numpy
+  - openpyxl
   - pandas
   - pip
   - pre_commit

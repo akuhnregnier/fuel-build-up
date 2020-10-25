@@ -19,11 +19,6 @@ repos:
           - id: trailing-whitespace
     - repo: local
       hooks:
-          - id: jupyter-clean
-            name: jupyter-clean
-            entry: clean_ipynb --no-py --no-autoflake --keep-output
-            language: system
-            files: \.ipynb$
           - id: no-autoflake-clean
             name: no-autoflake-clean
             entry: clean_ipynb --no-autoflake
@@ -40,6 +35,11 @@ repos:
             language: system
             files: \.py$
             exclude: (__init__|common|specific)\.py$
+          - id: jupyter-clean
+            name: jupyter-clean
+            entry: clean_ipynb --no-py --no-autoflake --keep-output
+            language: system
+            files: \.ipynb$
             # - id: pytest
             #   name: pytest
             #   entry: pytest -v -rs -m "not slow" --ignore-glob='joblib/**/func_code.py'

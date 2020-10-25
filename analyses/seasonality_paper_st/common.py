@@ -6,14 +6,18 @@ import math
 import os
 import pickle
 import re
+import shelve
 import sys
 import warnings
 from collections import defaultdict
+from copy import copy, deepcopy
 from datetime import datetime
 from functools import partial, reduce, wraps
 from itertools import combinations, islice, product
 from operator import mul
 from pathlib import Path
+from pprint import pprint
+from string import ascii_lowercase
 from time import time
 
 import cartopy.crs as ccrs
@@ -30,6 +34,7 @@ import pandas as pd
 import scipy
 import seaborn as sns
 import shap
+from alepython.ale import _sci_format, ale_plot, first_order_ale_quant
 from dask.distributed import Client
 from dateutil.relativedelta import relativedelta
 from hsluv import hsluv_to_rgb, rgb_to_hsluv
@@ -39,12 +44,11 @@ from loguru import logger as loguru_logger
 from matplotlib.colors import SymLogNorm, from_levels_and_colors
 from matplotlib.lines import Line2D
 from matplotlib.patches import Rectangle
+from pdpbox import pdp
+from scipy.ndimage.morphology import binary_dilation
 from sklearn.base import clone
 from sklearn.metrics import mean_squared_error, r2_score
 from sklearn.model_selection import train_test_split
-
-from alepython.ale import _sci_format, ale_plot, first_order_ale_quant
-from pdpbox import pdp
 from wildfires.analysis import (
     FigureSaver,
     MidpointNormalize,
@@ -183,18 +187,18 @@ experiment_color_dict = {
     experiment: color for experiment, color in zip(experiments, experiment_colors)
 }
 experiment_name_dict = {
-    "all": "all",
-    "best_top_15": "best top 15",
-    "15_most_important": "top 15",
-    "no_temporal_shifts": "no lags",
-    "fapar_only": "best top 15 (fAPAR)",
-    "sif_only": "best top 15 (SIF)",
-    "lai_only": "best top 15 (LAI)",
-    "vod_only": "best top 15 (VOD)",
-    "lagged_fapar_only": "lagged fAPAR only",
-    "lagged_sif_only": "lagged SIF only",
-    "lagged_lai_only": "lagged LAI only",
-    "lagged_vod_only": "lagged VOD only",
+    "all": "ALL",
+    "15_most_important": "TOP15",
+    "no_temporal_shifts": "CURR",
+    "fapar_only": "15VEG_FAPAR",
+    "lai_only": "15VEG_LAI",
+    "sif_only": "15VEG_SIF",
+    "vod_only": "15VEG_VOD",
+    "lagged_fapar_only": "CURRDD_FAPAR",
+    "lagged_lai_only": "CURRDD_LAI",
+    "lagged_sif_only": "CURRDD_SIF",
+    "lagged_vod_only": "CURRDD_VOD",
+    "best_top_15": "BEST15",
 }
 experiment_color_dict.update(
     {
@@ -220,6 +224,10 @@ shap_interact_params = {
     "job_samples": 50,  # Samples per job.
     "max_index": 5999,  # Maximum job array index (inclusive).
 }
+
+# Feature importance shelve.
+fi_shelve_file = str(Path(DATA_DIR) / PAPER_DIR.name / "feature_importances" / "frames")
+Path(fi_shelve_file).parent.mkdir(parents=True, exist_ok=True)
 
 # Specify common RF (training) params.
 n_splits = 5
@@ -334,9 +342,12 @@ for category, entries in feature_categories.items():
         feature_order[entry] = counter
         no_fill_feature_order[entry.strip(fill_name(""))] = counter
         counter += 1
+        no_fill_feature_order[shorten_features(entry.strip(fill_name("")))] = counter
+        counter += 1
 
 # If BA is included, position it first.
 no_fill_feature_order["GFED4 BA"] = -1
+no_fill_feature_order["BA"] = -2
 
 # Creating the Data Structures used for Fitting
 @data_memory.cache
@@ -625,7 +636,7 @@ def save_ale_2d_and_get_importance(
         1,
         2 if plot_samples else 1,
         figsize=figsize,
-        gridspec_kw={"width_ratios": [1.7, 1]} if plot_samples else None,
+        gridspec_kw={"width_ratios": [2, 1]} if plot_samples else None,
         constrained_layout=True if plot_samples else False,
     )  # Make sure plot is plotted onto a new figure.
     with parallel_backend("threading", n_jobs=n_jobs):
@@ -636,15 +647,16 @@ def save_ale_2d_and_get_importance(
             bins=20,
             fig=fig,
             ax=ax[0] if plot_samples else ax,
-            plot_quantiles=True,
+            plot_quantiles=False,
             quantile_axis=True,
             plot_kwargs={
                 "colorbar_kwargs": dict(
                     format="%.0e",
-                    pad=0.02 if plot_samples else 0.09,
-                    aspect=32,
-                    shrink=0.85,
+                    pad=-0.01 if plot_samples else 0.09,
+                    aspect=60,
+                    shrink=0.7,
                     ax=ax[0] if plot_samples else ax,
+                    label="ALE",
                 )
             },
             return_data=True,
@@ -654,13 +666,16 @@ def save_ale_2d_and_get_importance(
 
     # plt.subplots_adjust(top=0.89)
     for ax_key in ("ale", "quantiles_x"):
-        axes[ax_key].xaxis.set_tick_params(rotation=45)
+        if ax_key in axes:
+            axes[ax_key].xaxis.set_tick_params(rotation=45)
+
+    axes["ale"].set_aspect("equal")
+    axes["ale"].set_xlabel(features[0])
+    axes["ale"].set_ylabel(features[1])
+    axes["ale"].set_title("")
 
     if plot_samples:
         # Plotting samples.
-        ax[1].set_title("Samples")
-        # ax[1].set_xlabel(f"Feature '{features[0]}'")
-        # ax[1].set_ylabel(f"Feature '{features[1]}'")
         mod_quantiles_list = []
         for axis, quantiles in zip(("x", "y"), quantiles_list):
             inds = np.arange(len(quantiles))
@@ -670,9 +685,13 @@ def save_ale_2d_and_get_importance(
         samples_img = ax[1].pcolormesh(
             *mod_quantiles_list, samples.T, norm=SymLogNorm(linthresh=1)
         )
-        fig.colorbar(samples_img, ax=ax, shrink=0.6, pad=0.01)
+        fig.colorbar(
+            samples_img, ax=ax, shrink=0.6, pad=0.01, aspect=30, label="samples"
+        )
         ax[1].xaxis.set_tick_params(rotation=90)
         ax[1].set_aspect("equal")
+        ax[1].set_xlabel(features[0])
+        ax[1].set_ylabel(features[1])
         fig.set_constrained_layout_pads(
             w_pad=0.000, h_pad=0.000, hspace=0.0, wspace=0.015
         )
@@ -954,7 +973,7 @@ def get_lag(feature, target_feature=None):
 
     if match is None:
         # Try matching to 'short names'.
-        match = re.search(target_feature + r"(\d+)\sM", feature)
+        match = re.search(target_feature + r"(\d+)M", feature)
 
     if match is not None:
         return int(match.groups(default="0")[0])
@@ -1079,7 +1098,11 @@ def plot_and_list_importances(importances, methods, print_n=15, N=15, verbose=Tr
 
 
 def calculate_2d_masked_shap_values(
-    X_train, master_mask, shap_values, kind="train", additional_mask=None,
+    X_train,
+    master_mask,
+    shap_values,
+    kind="train",
+    additional_mask=None,
 ):
     shap_results = {}
 
@@ -1192,11 +1215,16 @@ def plot_shap_value_maps(
         )
         if kind == "mean":
             kwargs.update(
-                cmap="Spectral_r", cmap_midpoint=0, cmap_symmetric=True,
+                cmap="Spectral_r",
+                cmap_midpoint=0,
+                cmap_symmetric=True,
             )
         if kind == "rel_std":
             kwargs.update(
-                vmin=1e-2, vmax=10, extend="both", nbins=5,
+                vmin=1e-2,
+                vmax=10,
+                extend="both",
+                nbins=5,
             )
         return kwargs
 
@@ -1241,7 +1269,8 @@ def plot_shap_value_maps(
 def get_mm_indices(master_mask):
     mm_valid_indices = np.where(~master_mask.ravel())[0]
     mm_valid_train_indices, mm_valid_val_indices = train_test_split(
-        mm_valid_indices, **train_test_split_kwargs,
+        mm_valid_indices,
+        **train_test_split_kwargs,
     )
     return mm_valid_indices, mm_valid_train_indices, mm_valid_val_indices
 
@@ -1283,7 +1312,7 @@ def load_experiment_data(folders, which="all", ignore=()):
             experiments to load data for.
         which (iterable of {'all', 'offset_data', 'model', 'data_split', 'model_scores'}):
             'all' loads everything.
-        ignore (iterable of str): Subsets of the above the ignore.
+        ignore (iterable of str): Subsets of the above to ignore.
 
     Returns:
         dict of dict: Keys are the given `folders` and the loaded data types.
@@ -1296,7 +1325,8 @@ def load_experiment_data(folders, which="all", ignore=()):
     for experiment in folders:
         # Load the experiment module.
         spec = importlib.util.spec_from_file_location(
-            f"{experiment}_specific", str(PAPER_DIR / experiment / "specific.py"),
+            f"{experiment}_specific",
+            str(PAPER_DIR / experiment / "specific.py"),
         )
         module = importlib.util.module_from_spec(spec)
         data[experiment]["module"] = module
@@ -1345,7 +1375,7 @@ def load_experiment_data(folders, which="all", ignore=()):
 
 def ba_plotting(predicted_ba, masked_val_data, figure_saver):
     # date_str = "2010-01 to 2015-04"
-    text_xy = (0.012, 0.95)
+    text_xy = (0.012, 0.93)
     fs = 11
 
     fig, axes = plt.subplots(
@@ -1367,6 +1397,7 @@ def ba_plotting(predicted_ba, masked_val_data, figure_saver):
                 colorbar_kwargs={
                     "label": cbar_label,
                     "format": cbar_fmt,
+                    "pad": 0.02,
                     **colorbar_kwargs,
                 },
                 coastline_kwargs={"linewidth": 0.3},
@@ -1392,9 +1423,9 @@ def ba_plotting(predicted_ba, masked_val_data, figure_saver):
             title="",
             boundaries=boundaries,
             extend=extend,
+            cbar_label="Ob. BA",
         ),
     )
-    axes[0].text(*text_xy, "(a)", transform=axes[0].transAxes, fontsize=fs)
 
     # Plotting predicted.
     fig = cube_plotting(
@@ -1406,9 +1437,9 @@ def ba_plotting(predicted_ba, masked_val_data, figure_saver):
             title="",
             boundaries=boundaries,
             extend=extend,
+            cbar_label="Pr. BA",
         ),
     )
-    axes[1].text(*text_xy, "(b)", transform=axes[1].transAxes, fontsize=fs)
 
     # frac_diffs = (masked_val_data - predicted_ba) / masked_val_data
     frac_diffs = np.mean(masked_val_data - predicted_ba, axis=0) / np.mean(
@@ -1427,11 +1458,14 @@ def ba_plotting(predicted_ba, masked_val_data, figure_saver):
             title="",
             cmap_midpoint=0,
             boundaries=diff_boundaries,
-            colorbar_kwargs={"label": "<(Obs. - Pred.)> / <Obs.>"},
+            cbar_label="<Ob. - Pr.)> / <Ob.>",
             extend=extend,
+            colorbar_kwargs=dict(shrink=0.6, extendfrac=0.1),
         ),
     )
-    axes[2].text(*text_xy, "(c)", transform=axes[2].transAxes, fontsize=fs)
+
+    for ax, title in zip(axes, ascii_lowercase):
+        ax.text(*text_xy, f"({title})", transform=ax.transAxes, fontsize=fs)
 
     # Plot relative MSEs.
     """
@@ -1456,3 +1490,106 @@ def ba_plotting(predicted_ba, masked_val_data, figure_saver):
 
     """
     figure_saver.save_figure(fig, f"ba_prediction", sub_directory="predictions")
+
+
+class SetupFourMapAxes:
+    """Context manager than handles construction and formatting of map axes.
+
+    A single shared colorbar axis is created.
+
+    Examples:
+        >>> with SetupFourMapAxes() as (fig, axes, cax):  # doctest: +SKIP
+        >>>     # Carry out plotting here.  # doctest: +SKIP
+        >>> # Keep using `fig`, etc... here to carry out saving, etc...  # doctest: +SKIP
+        >>> # It is important this is done after __exit__ is called!  # doctest: +SKIP
+
+    """
+
+    def __init__(self, figsize=(10.2, 5.2), cbar="vertical"):
+        """Define basic parameters used to set up the figure and axes."""
+        self.fig = plt.figure(figsize=figsize)
+        self.cbar = cbar
+
+        if self.cbar == "vertical":
+            # Axis factor.
+            af = 3
+            nrows = 2 * af
+
+            gs = self.fig.add_gridspec(
+                nrows=nrows,
+                ncols=2 * af + 2,
+                width_ratios=[1 / af, 1 / af] * af + [0.001] + [0.02],
+            )
+            self.axes = [
+                self.fig.add_subplot(
+                    gs[i * af : (i + 1) * af, j * af : (j + 1) * af],
+                    projection=ccrs.Robinson(),
+                )
+                for j, i in product(range(2), repeat=2)
+            ]
+
+            diff = 2
+            assert (
+                diff % 2 == 0
+            ), f"Want an even diff for symmetric bar placement (got diff {diff})."
+            cax_l = 0 + diff // 2
+            cax_u = nrows - diff // 2
+
+            self.cax = self.fig.add_subplot(gs[cax_l:cax_u, -1])
+        elif self.cbar == "horizontal":
+            # Axis factor.
+            af = 3
+            ncols = 2 * af
+
+            gs = self.fig.add_gridspec(
+                nrows=2 * af + 1,
+                ncols=ncols,
+                height_ratios=[1 / af, 1 / af] * af + [0.05],
+            )
+            self.axes = [
+                self.fig.add_subplot(
+                    gs[i * af : (i + 1) * af, j * af : (j + 1) * af],
+                    projection=ccrs.Robinson(),
+                )
+                for j, i in product(range(2), repeat=2)
+            ]
+
+            diff = 4
+            assert (
+                diff % 2 == 0
+            ), f"Want an even diff for symmetric bar placement (got diff {diff})."
+            cax_l = 0 + diff // 2
+            cax_u = ncols - diff // 2
+
+            self.cax = self.fig.add_subplot(gs[-1, cax_l:cax_u])
+        else:
+            raise ValueError(f"Unkown value for 'cbar' {cbar}.")
+
+    def __enter__(self):
+        """Return the figure, 4 main plotting axes, and colorbar axes."""
+        return self.fig, self.axes, self.cax
+
+    def __exit__(self, exc_type, value, traceback):
+        """Adjust axis positions after plotting."""
+        if self.cbar == "vertical":
+            self.fig.subplots_adjust(wspace=0, hspace=0.5)
+
+            # Move the left-column axes to the right to decrease the gap.
+            for ax in self.axes[0:2]:
+                box = ax.get_position()
+                shift = 0.015
+                box.x0 += shift
+                box.x1 += shift
+                ax.set_position(box)
+        elif self.cbar == "horizontal":
+            self.fig.subplots_adjust(wspace=-0.4, hspace=0.5)
+
+            self.cax.xaxis.set_label_position("top")
+
+            # Move the legend axes upwards.
+            ax = self.cax
+            box = ax.get_position()
+            shift = 0.02
+            box.y0 += shift
+            box.y1 += shift
+            ax.set_position(box)
