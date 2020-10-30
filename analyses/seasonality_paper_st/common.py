@@ -41,7 +41,7 @@ from hsluv import hsluv_to_rgb, rgb_to_hsluv
 from iris.time import PartialDateTime
 from joblib import Parallel, delayed, parallel_backend
 from loguru import logger as loguru_logger
-from matplotlib.colors import SymLogNorm, from_levels_and_colors
+from matplotlib.colors import LogNorm, SymLogNorm, from_levels_and_colors
 from matplotlib.lines import Line2D
 from matplotlib.patches import Rectangle
 from pdpbox import pdp
@@ -217,6 +217,41 @@ experiment_marker_dict.update(
         for experiment in experiments
     }
 )
+
+units = {
+    "DD": "days",
+    "SWI": r"$\mathrm{m}^3 \mathrm{m}^{-3}$",
+    "MaxT": "K",
+    "DTR": "K",
+    "Lightning": r"$\mathrm{strokes}\ \mathrm{km}^{-2}$",
+    "CROP": "1",
+    "POPD": r"$\mathrm{inh}\ \mathrm{km}^{-2}$",
+    "HERB": "1",
+    "SHRUB": "1",
+    "TREE": "1",
+    "AGB": "r$\mathrm{kg}\ \mathrm{m}^{-2}$",
+    "VOD": "1",
+    "FAPAR": "%",
+    "LAI": r"$\mathrm{m}^2\ \mathrm{m}^{-2}$",
+    "SIF": "r$\mathrm{mW}\ \mathrm{m}^{-2}\ \mathrm{sr}^{-1}\ \mathrm{nm}^{-1}$",
+}
+
+
+def add_units(variables):
+    """Add units to variables based on the `units` dict."""
+    if isinstance(variables, str):
+        return add_units([variables])[0]
+    var_units = []
+    for var in variables:
+        matched_unit_vars = [
+            unit_var for unit_var in units if re.search(unit_var, var) is not None
+        ]
+        assert (
+            len(matched_unit_vars) == 1
+        ), f"There should only be exactly 1 matching variable for '{var}'."
+        var_units.append(f"{var} ({units[matched_unit_vars[0]]})")
+    return var_units
+
 
 # SHAP parameters.
 shap_params = {"job_samples": 2000}  # Samples per job.
@@ -618,7 +653,7 @@ def save_ale_2d_and_get_importance(
     model,
     train_set,
     features,
-    n_jobs=8,
+    n_jobs=1,
     include_first_order=False,
     figure_saver=None,
     plot_samples=True,
@@ -627,18 +662,74 @@ def save_ale_2d_and_get_importance(
     model.n_jobs = n_jobs
 
     if figsize is None:
-        if plot_samples:
-            figsize = (10, 4.5)
-        else:
-            figsize = (7.5, 4.5)
+        figsize = (10, 4.5)
 
-    fig, ax = plt.subplots(
-        1,
-        2 if plot_samples else 1,
-        figsize=figsize,
-        gridspec_kw={"width_ratios": [2, 1]} if plot_samples else None,
-        constrained_layout=True if plot_samples else False,
-    )  # Make sure plot is plotted onto a new figure.
+    cbar_width = 0.01
+
+    x_coords = {}
+    x_coords["ALE start"] = 0
+    x_coords["ALE end"] = 0.45
+    x_coords["ALE cbar start"] = 0.46
+    x_coords["ALE cbar end"] = x_coords["ALE cbar start"] + cbar_width
+    x_coords["Samples start"] = 0.63
+    x_coords["Samples end"] = 0.9
+    x_coords["Samples cbar start"] = 0.91
+    x_coords["Samples cbar end"] = x_coords["Samples cbar start"] + cbar_width
+
+    y_bottom = {
+        "Samples": 1 / 3,  # Samples plot and cbar bottom.
+    }
+    cbar_height = {
+        "ALE": 0.7,
+        "Samples": 0.4,
+    }
+
+    top = 1
+
+    fig = plt.figure(figsize=figsize)
+
+    # ALE plot axes.
+    ax = [
+        fig.add_axes(
+            [x_coords["ALE start"], 0, x_coords["ALE end"] - x_coords["ALE start"], top]
+        )
+    ]
+    # ALE plot cbar axes.
+    cax = [
+        fig.add_axes(
+            [
+                x_coords["ALE cbar start"],
+                top * (1 - cbar_height["ALE"]) / 2,
+                x_coords["ALE cbar end"] - x_coords["ALE cbar start"],
+                cbar_height["ALE"],
+            ]
+        )
+    ]
+    if plot_samples:
+        # Samples plot axes.
+        ax.append(
+            fig.add_axes(
+                [
+                    x_coords["Samples start"],
+                    y_bottom["Samples"],
+                    x_coords["Samples end"] - x_coords["Samples start"],
+                    top - y_bottom["Samples"],
+                ]
+            )
+        )
+        # Samples plot cbar axes.
+
+        cax.append(
+            fig.add_axes(
+                [
+                    x_coords["Samples cbar start"],
+                    (y_bottom["Samples"] + top) / 2 - cbar_height["Samples"] / 2,
+                    x_coords["Samples cbar end"] - x_coords["Samples cbar start"],
+                    cbar_height["Samples"],
+                ]
+            )
+        )
+
     with parallel_backend("threading", n_jobs=n_jobs):
         fig, axes, (quantiles_list, ale, samples) = ale_plot(
             model,
@@ -646,18 +737,18 @@ def save_ale_2d_and_get_importance(
             features,
             bins=20,
             fig=fig,
-            ax=ax[0] if plot_samples else ax,
+            ax=ax[0],
             plot_quantiles=False,
             quantile_axis=True,
             plot_kwargs={
+                "cmap": "inferno",
                 "colorbar_kwargs": dict(
-                    format="%.0e",
-                    pad=-0.01 if plot_samples else 0.09,
-                    aspect=60,
-                    shrink=0.7,
-                    ax=ax[0] if plot_samples else ax,
-                    label="ALE",
-                )
+                    format=ticker.FuncFormatter(
+                        lambda x, pos: simple_sci_format(x, precision=1)
+                    ),
+                    cax=cax[0],
+                    label="ALE (BA)",
+                ),
             },
             return_data=True,
             n_jobs=n_jobs,
@@ -670,8 +761,8 @@ def save_ale_2d_and_get_importance(
             axes[ax_key].xaxis.set_tick_params(rotation=45)
 
     axes["ale"].set_aspect("equal")
-    axes["ale"].set_xlabel(features[0])
-    axes["ale"].set_ylabel(features[1])
+    axes["ale"].set_xlabel(add_units(features[0]))
+    axes["ale"].set_ylabel(add_units(features[1]))
     axes["ale"].set_title("")
 
     if plot_samples:
@@ -681,27 +772,53 @@ def save_ale_2d_and_get_importance(
             inds = np.arange(len(quantiles))
             mod_quantiles_list.append(inds)
             ax[1].set(**{f"{axis}ticks": inds})
+
             ax[1].set(**{f"{axis}ticklabels": _sci_format(quantiles, scilim=0.6)})
         samples_img = ax[1].pcolormesh(
             *mod_quantiles_list, samples.T, norm=SymLogNorm(linthresh=1)
         )
+
+        @ticker.FuncFormatter
+        def samples_colorbar_fmt(x, pos):
+            if x < 0:
+                raise ValueError("Samples cannot be -ve.")
+            if np.isclose(x, 0):
+                return "0"
+            if np.log10(x).is_integer():
+                return simple_sci_format(x)
+            return ""
+
         fig.colorbar(
-            samples_img, ax=ax, shrink=0.6, pad=0.01, aspect=30, label="samples"
+            samples_img,
+            # XXX: old
+            # ax=ax, shrink=0.6, pad=0.01, aspect=30,
+            cax=cax[1],
+            label="samples",
+            format=samples_colorbar_fmt,
         )
         ax[1].xaxis.set_tick_params(rotation=90)
         ax[1].set_aspect("equal")
-        ax[1].set_xlabel(features[0])
-        ax[1].set_ylabel(features[1])
+        ax[1].set_xlabel(add_units(features[0]))
+        ax[1].set_ylabel(add_units(features[1]))
         fig.set_constrained_layout_pads(
             w_pad=0.000, h_pad=0.000, hspace=0.0, wspace=0.015
         )
 
     if figure_saver is not None:
-        figure_saver.save_figure(
-            fig,
-            "__".join(features),
-            sub_directory="2d_ale_first_order" if include_first_order else "2d_ale",
-        )
+        if plot_samples:
+            figure_saver.save_figure(
+                fig,
+                "__".join(features),
+                sub_directory="2d_ale_first_order" if include_first_order else "2d_ale",
+            )
+        else:
+            figure_saver.save_figure(
+                fig,
+                "__".join(features) + "_no_count",
+                sub_directory="2d_ale_first_order_no_count"
+                if include_first_order
+                else "2d_ale_no_count",
+            )
 
     #     min_samples = (
     #         train_set.shape[0] / reduce(mul, map(lambda x: len(x) - 1, quantiles_list))
@@ -889,9 +1006,6 @@ def multi_ale_plot_1d(
     combined_quantiles = np.vstack([quantiles[None] for quantiles in quantile_list])
 
     final_quantiles = np.mean(combined_quantiles, axis=0)
-    # Account for extrema.
-    final_quantiles[0] = np.min(combined_quantiles)
-    final_quantiles[-1] = np.max(combined_quantiles)
 
     mod_quantiles = np.arange(len(quantiles))
     for feature, quantiles, ale in zip(columns, quantile_list, ale_list):
@@ -1461,6 +1575,7 @@ def ba_plotting(predicted_ba, masked_val_data, figure_saver):
             cbar_label="<Ob. - Pr.)> / <Ob.>",
             extend=extend,
             colorbar_kwargs=dict(shrink=0.6, extendfrac=0.1),
+            cmap="BrBG",
         ),
     )
 

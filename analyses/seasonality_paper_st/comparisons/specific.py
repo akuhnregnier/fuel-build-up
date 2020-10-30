@@ -77,9 +77,6 @@ def single_ax_multi_ale_1d(
     combined_quantiles = np.vstack([quantiles[None] for quantiles in quantile_list])
 
     final_quantiles = np.mean(combined_quantiles, axis=0)
-    # Account for extrema.
-    final_quantiles[0] = np.min(combined_quantiles)
-    final_quantiles[-1] = np.max(combined_quantiles)
 
     mod_quantiles = np.arange(len(quantiles))
 
@@ -187,7 +184,7 @@ def multi_model_ale_1d(
             feature_data=feature_data,
             feature=feature,
             bins=bins,
-            xlabel=shorten_features(feature).replace(fill_name(""), ""),
+            xlabel=add_units(shorten_features(feature).replace(fill_name(""), "")),
             n_jobs=n_jobs,
             verbose=verbose,
         )
@@ -205,7 +202,7 @@ def multi_model_ale_1d(
         ax.yaxis.set_major_formatter(major_formatter)
 
     for row_axes in axes:
-        row_axes[0].set_ylabel("ALE")
+        row_axes[0].set_ylabel("ALE (BA)")
 
     fig.tight_layout()
 
