@@ -741,6 +741,7 @@ def save_ale_2d_and_get_importance(
             plot_quantiles=False,
             quantile_axis=True,
             plot_kwargs={
+                "kind": "grid",
                 "cmap": "inferno",
                 "colorbar_kwargs": dict(
                     format=ticker.FuncFormatter(
