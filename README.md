@@ -2,6 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blueviolet)](https://github.com/akuhnregnier/fuel-build-up/blob/master/LICENSE)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/ambv/black)
+[![DOI](https://zenodo.org/badge/308943963.svg)](https://zenodo.org/badge/latestdoi/308943963)
 
 Analysis of wildfires.
 
