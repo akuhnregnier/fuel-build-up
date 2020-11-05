@@ -19,7 +19,7 @@ warnings.filterwarnings(
 
 figure_saver = PaperFigureSaver(
     directories=Path("~") / "tmp" / PROJECT_DIR.parent.name / PROJECT_DIR.name,
-    debug=True,
+    debug=False,
 )
 map_figure_saver = figure_saver(**map_figure_saver_kwargs)
 for fig_saver in (figure_saver, map_figure_saver):
@@ -39,6 +39,7 @@ def single_ax_multi_ale_1d(
     title=None,
     n_jobs=8,
     verbose=False,
+    rotation=20,
 ):
     quantile_list = []
     ale_list = []
@@ -87,7 +88,7 @@ def single_ax_multi_ale_1d(
         ax.plot(
             np.interp(quantiles, final_quantiles, mod_quantiles),
             ale,
-            **{"marker": "o", "ms": 3, **plot_kwargs},
+            **{"marker": "o", **plot_kwargs},
         )
 
         ax.set_xticks(mod_quantiles[::2])
@@ -97,9 +98,7 @@ def single_ax_multi_ale_1d(
                 for t in _sci_format(final_quantiles[::2], scilim=0)
             ]
         )
-        ax.xaxis.set_tick_params(rotation=18)
-
-        ax.grid(alpha=0.4, linestyle="--")
+        ax.xaxis.set_tick_params(rotation=rotation)
 
         ax.set_xlabel(xlabel)
         ax.set_ylabel(ylabel)
@@ -123,6 +122,7 @@ def multi_model_ale_1d(
     axes=None,
     legend=True,
     legend_labels=None,
+    rotation=20,
 ):
     assert set(experiment_data) == set(experiment_plot_kwargs)
     plotted_experiments = set()
@@ -187,6 +187,7 @@ def multi_model_ale_1d(
             xlabel=add_units(shorten_features(feature).replace(fill_name(""), "")),
             n_jobs=n_jobs,
             verbose=verbose,
+            rotation=rotation,
         )
 
     @ticker.FuncFormatter

@@ -1,0 +1,22 @@
+axes.grid:          True    # display grid or not
+axes.grid.axis:     both    # which axis the grid should apply to
+axes.grid.which:    major   # gridlines at {major, minor, both} ticks
+
+grid.linestyle: --
+grid.alpha:     0.4     # transparency, between 0.0 and 1.0
+
+legend.loc:           best
+
+font.size:        8
+legend.fontsize:  7
+xtick.labelsize:  7
+ytick.labelsize:  7
+axes.labelsize:   8
+axes.titlesize:   9
+
+lines.markersize: 3.5
+
+figure.figsize:     4, 2.2  # figure size in inches
+
+savefig.dpi:       450          # figure dots per inch or 'figure'
+savefig.bbox:      tight # {tight, standard}

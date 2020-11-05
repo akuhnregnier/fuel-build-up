@@ -18,7 +18,7 @@ warnings.filterwarnings(
 
 figure_saver = PaperFigureSaver(
     directories=Path("~") / "tmp" / PROJECT_DIR.parent.name / PROJECT_DIR.name,
-    debug=True,
+    debug=False,
 )
 map_figure_saver = figure_saver(**map_figure_saver_kwargs)
 for fig_saver in (figure_saver, map_figure_saver):

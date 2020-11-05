@@ -111,12 +111,15 @@ from wildfires.utils import (
     shorten_features,
     significant_peak,
     simple_sci_format,
+    update_nested_dict,
 )
 
 if "TQDMAUTO" in os.environ:
     from tqdm.auto import tqdm
 else:
     from tqdm import tqdm
+
+mpl.rc_file(Path(__file__).parent / "matplotlibrc")
 
 loguru_logger.enable("alepython")
 loguru_logger.remove()
@@ -133,9 +136,23 @@ warnings.filterwarnings(
     "ignore", 'Setting feature_perturbation = "tree_path_dependent".*'
 )
 
-normal_coast_linewidth = 0.3
-mpl.rc("figure", figsize=(14, 6))
-mpl.rc("font", size=9.0)
+orig_cube_plotting = cube_plotting
+
+
+def cube_plotting(*args, **kwargs):
+    """Modified cube plotting with default arguments."""
+    kwargs = kwargs.copy()
+    assert len(args) <= 1, "At most 1 positional argument supported."
+    # Assume certain default kwargs, unless overriden.
+    cbar_fmt = ticker.FuncFormatter(lambda x, pos: simple_sci_format(x))
+    defaults = dict(
+        coastline_kwargs=dict(linewidth=0.3),
+        gridline_kwargs=dict(zorder=0, alpha=0.8, linestyle="--", linewidth=0.3),
+        colorbar_kwargs=dict(format=cbar_fmt, pad=0.02),
+    )
+    kwargs = update_nested_dict(defaults, kwargs)
+    return orig_cube_plotting(*args, **kwargs)
+
 
 register_cl_backend()
 PAPER_DIR = Path(__file__).resolve().parent
@@ -172,7 +189,7 @@ class PaperFigureSaver(FigureSaver):
 
 
 figure_saver = PaperFigureSaver(
-    directories=Path("~") / "tmp" / PAPER_DIR.name, debug=True
+    directories=Path("~") / "tmp" / PAPER_DIR.name, debug=False
 )
 map_figure_saver = figure_saver(**map_figure_saver_kwargs)
 
@@ -231,7 +248,7 @@ units = {
     "TREE": "1",
     "AGB": "r$\mathrm{kg}\ \mathrm{m}^{-2}$",
     "VOD": "1",
-    "FAPAR": "%",
+    "FAPAR": "1",
     "LAI": r"$\mathrm{m}^2\ \mathrm{m}^{-2}$",
     "SIF": "r$\mathrm{mW}\ \mathrm{m}^{-2}\ \mathrm{sr}^{-1}\ \mathrm{nm}^{-1}$",
 }
@@ -662,25 +679,25 @@ def save_ale_2d_and_get_importance(
     model.n_jobs = n_jobs
 
     if figsize is None:
-        figsize = (10, 4.5)
+        figsize = (6.15, 3.17)
 
     cbar_width = 0.01
 
     x_coords = {}
     x_coords["ALE start"] = 0
-    x_coords["ALE end"] = 0.45
-    x_coords["ALE cbar start"] = 0.46
+    x_coords["ALE end"] = 0.42
+    x_coords["ALE cbar start"] = x_coords["ALE end"] + 0.01
     x_coords["ALE cbar end"] = x_coords["ALE cbar start"] + cbar_width
-    x_coords["Samples start"] = 0.63
+    x_coords["Samples start"] = 0.65
     x_coords["Samples end"] = 0.9
-    x_coords["Samples cbar start"] = 0.91
+    x_coords["Samples cbar start"] = x_coords["Samples end"] + 0.01
     x_coords["Samples cbar end"] = x_coords["Samples cbar start"] + cbar_width
 
     y_bottom = {
         "Samples": 1 / 3,  # Samples plot and cbar bottom.
     }
     cbar_height = {
-        "ALE": 0.7,
+        "ALE": 0.6,
         "Samples": 0.4,
     }
 
@@ -718,7 +735,6 @@ def save_ale_2d_and_get_importance(
             )
         )
         # Samples plot cbar axes.
-
         cax.append(
             fig.add_axes(
                 [
@@ -756,15 +772,24 @@ def save_ale_2d_and_get_importance(
             include_first_order=include_first_order,
         )
 
-    # plt.subplots_adjust(top=0.89)
     for ax_key in ("ale", "quantiles_x"):
         if ax_key in axes:
-            axes[ax_key].xaxis.set_tick_params(rotation=45)
+            axes[ax_key].xaxis.set_tick_params(rotation=50)
 
     axes["ale"].set_aspect("equal")
     axes["ale"].set_xlabel(add_units(features[0]))
     axes["ale"].set_ylabel(add_units(features[1]))
     axes["ale"].set_title("")
+
+    axes["ale"].xaxis.set_ticklabels(
+        np.vectorize(partial(simple_sci_format, precision=1))(quantiles_list[0])
+    )
+    axes["ale"].yaxis.set_ticklabels(
+        np.vectorize(partial(simple_sci_format, precision=1))(quantiles_list[1])
+    )
+
+    for tick in axes["ale"].xaxis.get_major_ticks():
+        tick.label1.set_horizontalalignment("right")
 
     if plot_samples:
         # Plotting samples.
@@ -773,8 +798,16 @@ def save_ale_2d_and_get_importance(
             inds = np.arange(len(quantiles))
             mod_quantiles_list.append(inds)
             ax[1].set(**{f"{axis}ticks": inds})
+            ax[1].set(
+                **{
+                    f"{axis}ticklabels": np.vectorize(
+                        partial(simple_sci_format, precision=1)
+                    )(quantiles)
+                }
+            )
+            for label in getattr(ax[1], f"{axis}axis").get_ticklabels()[1::2]:
+                label.set_visible(False)
 
-            ax[1].set(**{f"{axis}ticklabels": _sci_format(quantiles, scilim=0.6)})
         samples_img = ax[1].pcolormesh(
             *mod_quantiles_list, samples.T, norm=SymLogNorm(linthresh=1)
         )
@@ -797,7 +830,9 @@ def save_ale_2d_and_get_importance(
             label="samples",
             format=samples_colorbar_fmt,
         )
-        ax[1].xaxis.set_tick_params(rotation=90)
+        ax[1].xaxis.set_tick_params(rotation=50)
+        for tick in ax[1].xaxis.get_major_ticks():
+            tick.label1.set_horizontalalignment("right")
         ax[1].set_aspect("equal")
         ax[1].set_xlabel(add_units(features[0]))
         ax[1].set_ylabel(add_units(features[1]))
@@ -965,7 +1000,7 @@ def multi_ale_plot_1d(
     xlabel=None,
     ylabel=None,
     title=None,
-    n_jobs=8,
+    n_jobs=1,
     verbose=False,
     figure_saver=None,
     CACHE_DIR=None,
@@ -1009,13 +1044,16 @@ def multi_ale_plot_1d(
     final_quantiles = np.mean(combined_quantiles, axis=0)
 
     mod_quantiles = np.arange(len(quantiles))
-    for feature, quantiles, ale in zip(columns, quantile_list, ale_list):
+
+    markers = ["o", "v", "^", "<", ">", "x", "+"]
+    for feature, quantiles, ale, marker in zip(
+        columns, quantile_list, ale_list, markers
+    ):
         # Interpolate each of the quantiles relative to the accumulated final quantiles.
         ax.plot(
             np.interp(quantiles, final_quantiles, mod_quantiles),
             ale,
-            marker="o",
-            ms=3,
+            marker=marker,
             label=feature,
         )
 
@@ -1029,10 +1067,8 @@ def multi_ale_plot_1d(
         ticker.FuncFormatter(lambda x, pos: simple_sci_format(x))
     )
 
-    ax.grid(alpha=0.4, linestyle="--")
-
     fig.suptitle(title)
-    ax.set_xlabel(xlabel)
+    ax.set_xlabel(xlabel, va="center_baseline")
     ax.set_ylabel(ylabel)
 
     if figure_saver is not None:
@@ -1326,7 +1362,6 @@ def plot_shap_value_maps(
                 "format": "%0.1e",
                 "label": f"SHAP ('{shorten_features(feature)}')",
             },
-            coastline_kwargs={"linewidth": 0.3},
         )
         if kind == "mean":
             kwargs.update(
@@ -1488,38 +1523,28 @@ def load_experiment_data(folders, which="all", ignore=()):
     return data
 
 
-def ba_plotting(predicted_ba, masked_val_data, figure_saver):
+def ba_plotting(predicted_ba, masked_val_data, figure_saver, cbar_label_x_offset=None):
     # date_str = "2010-01 to 2015-04"
-    text_xy = (0.012, 0.93)
-    fs = 11
+    text_xy = (0.02, 0.935)
 
     fig, axes = plt.subplots(
         3,
         1,
         subplot_kw={"projection": ccrs.Robinson()},
-        figsize=(5.1, 2.3 * 3),
+        figsize=(5.1, (2.3 + 0.01) * 3),
         gridspec_kw={"hspace": 0.01, "wspace": 0.01},
     )
 
     # Plotting params.
 
-    cbar_fmt = ticker.FuncFormatter(lambda x, pos: simple_sci_format(x))
-
     def get_plot_kwargs(cbar_label="Burned Area Fraction", **kwargs):
-        colorbar_kwargs = kwargs.pop("colorbar_kwargs", {})
-        return {
-            **dict(
-                colorbar_kwargs={
-                    "label": cbar_label,
-                    "format": cbar_fmt,
-                    "pad": 0.02,
-                    **colorbar_kwargs,
-                },
-                coastline_kwargs={"linewidth": 0.3},
-                cmap="brewer_RdYlBu_11",
-            ),
-            **kwargs,
-        }
+        defaults = dict(
+            colorbar_kwargs={
+                "label": cbar_label,
+            },
+            cmap="brewer_RdYlBu_11",
+        )
+        return update_nested_dict(defaults, kwargs)
 
     assert np.all(predicted_ba.mask == masked_val_data.mask)
 
@@ -1529,7 +1554,7 @@ def ba_plotting(predicted_ba, masked_val_data, figure_saver):
     extend = "both"
 
     # Plotting observed.
-    fig = cube_plotting(
+    fig, cb0 = cube_plotting(
         masked_val_data,
         ax=axes[0],
         **get_plot_kwargs(
@@ -1540,10 +1565,11 @@ def ba_plotting(predicted_ba, masked_val_data, figure_saver):
             extend=extend,
             cbar_label="Ob. BA",
         ),
+        return_cbar=True,
     )
 
     # Plotting predicted.
-    fig = cube_plotting(
+    fig, cb1 = cube_plotting(
         predicted_ba,
         ax=axes[1],
         **get_plot_kwargs(
@@ -1554,6 +1580,7 @@ def ba_plotting(predicted_ba, masked_val_data, figure_saver):
             extend=extend,
             cbar_label="Pr. BA",
         ),
+        return_cbar=True,
     )
 
     # frac_diffs = (masked_val_data - predicted_ba) / masked_val_data
@@ -1565,7 +1592,7 @@ def ba_plotting(predicted_ba, masked_val_data, figure_saver):
     diff_boundaries = [-1e1, -1e0, 0, 1e-1]
     extend = "both"
 
-    fig = cube_plotting(
+    fig, cb2 = cube_plotting(
         frac_diffs,
         ax=axes[2],
         **get_plot_kwargs(
@@ -1575,13 +1602,31 @@ def ba_plotting(predicted_ba, masked_val_data, figure_saver):
             boundaries=diff_boundaries,
             cbar_label="<Ob. - Pr.)> / <Ob.>",
             extend=extend,
-            colorbar_kwargs=dict(shrink=0.6, extendfrac=0.1),
+            colorbar_kwargs=dict(aspect=24, shrink=0.6, extendfrac=0.07),
             cmap="BrBG",
         ),
+        return_cbar=True,
     )
 
+    if cbar_label_x_offset is not None:
+        # Manual control.
+        max_x = 0
+        for cb in (cb0, cb1, cb2):
+            bbox = cb.ax.get_position()
+            if bbox.xmax > max_x:
+                max_x = bbox.xmax
+
+        for cb in (cb0, cb1, cb2):
+            bbox = cb.ax.get_position()
+            mean_y = (bbox.ymin + bbox.ymax) / 2.0
+            cb.ax.yaxis.set_label_coords(
+                max_x + cbar_label_x_offset, mean_y, transform=fig.transFigure
+            )
+    else:
+        fig.align_labels()
+
     for ax, title in zip(axes, ascii_lowercase):
-        ax.text(*text_xy, f"({title})", transform=ax.transAxes, fontsize=fs)
+        ax.text(*text_xy, f"({title})", transform=ax.transAxes)
 
     # Plot relative MSEs.
     """
@@ -1621,7 +1666,7 @@ class SetupFourMapAxes:
 
     """
 
-    def __init__(self, figsize=(10.2, 5.2), cbar="vertical"):
+    def __init__(self, figsize=(9.86, 4.93), cbar="vertical"):
         """Define basic parameters used to set up the figure and axes."""
         self.fig = plt.figure(figsize=figsize)
         self.cbar = cbar
@@ -1698,14 +1743,14 @@ class SetupFourMapAxes:
                 box.x1 += shift
                 ax.set_position(box)
         elif self.cbar == "horizontal":
-            self.fig.subplots_adjust(wspace=-0.4, hspace=0.5)
+            self.fig.subplots_adjust(wspace=-0.43, hspace=0.5)
 
             self.cax.xaxis.set_label_position("top")
 
             # Move the legend axes upwards.
             ax = self.cax
             box = ax.get_position()
-            shift = 0.02
+            shift = 0.01
             box.y0 += shift
             box.y1 += shift
             ax.set_position(box)
