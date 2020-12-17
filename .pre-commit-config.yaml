@@ -37,7 +37,7 @@ repos:
             exclude: (__init__|common|specific)\.py$
           - id: jupyter-clean
             name: jupyter-clean
-            entry: clean_ipynb --no-py --no-autoflake --keep-output
+            entry: clean_ipynb --no-py --keep-output
             language: system
             files: \.ipynb$
             # - id: pytest
